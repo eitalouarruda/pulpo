@@ -819,3 +819,16 @@ kbd {
   opacity: 0.4;
   cursor: default;
 }
+
+/* ------------------------------------------------------------ idioma */
+
+.segmented {
+  display: flex;
+  gap: 4px;
+}
+
+.segmented [aria-checked="true"] {
+  border-color: var(--accent);
+  color: var(--fg);
+  background: var(--panel);
+}

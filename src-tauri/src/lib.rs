@@ -5,6 +5,7 @@ mod platform;
 mod popups;
 mod services;
 mod shortcuts;
+mod spellcheck;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -395,7 +396,9 @@ pub fn run() {
     let builder = tauri::Builder::default();
     #[cfg(target_os = "linux")]
     let builder = builder.runtime({
-        let mut cef = tauri_runtime_cef::Cef::default();
+        let mut cef = tauri_runtime_cef::Cef::default()
+            .profile_preference("browser.enable_spellchecking", true)
+            .profile_preference_value("spellcheck.dictionaries", spellcheck::dictionaries());
         // Chromium guarda las sesiones bajo esta raíz. Por defecto es la caché
         // del usuario; se mueve a los datos de la app para que limpiar la
         // caché no cierre la sesión de WhatsApp.
@@ -757,6 +760,10 @@ fn open_service(
             }
         }
     });
+    #[cfg(windows)]
+    {
+        builder = builder.additional_browser_args(&spellcheck::webview2_args());
+    }
     if let Some(ua) = diag::user_agent() {
         builder = builder.user_agent(&ua);
     }

@@ -733,13 +733,26 @@ $("#sidebar").addEventListener("mousedown", () => {
 
 // ---------------------------------------------------------------- idioma
 
-const languageSelect = $<HTMLSelectElement>("#language");
-languageSelect.replaceChildren(
-  ...LANGUAGES.map((l) => Object.assign(document.createElement("option"), { value: l.value, textContent: l.label })),
-);
-languageSelect.value = currentLanguage();
-languageSelect.addEventListener("change", () => {
-  setLanguage(languageSelect.value as Language);
+const languageButtons = $("#language");
+
+function renderLanguages() {
+  languageButtons.replaceChildren(
+    ...LANGUAGES.map((l) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.role = "radio";
+      b.className = "ghost-btn";
+      b.textContent = l.label;
+      b.setAttribute("aria-checked", String(l.value === currentLanguage()));
+      b.addEventListener("click", () => changeLanguage(l.value));
+      return b;
+    }),
+  );
+}
+
+function changeLanguage(lang: Language) {
+  setLanguage(lang);
+  renderLanguages();
   // Los textos que se pintan desde aquí se rehacen con el idioma nuevo.
   renderSidebar();
   renderManage();
@@ -747,7 +760,9 @@ languageSelect.addEventListener("change", () => {
   if (base) renderBase(base);
   showStatus(lastStatus);
   invoke<ZoomInfo>("get_zoom").then(showZoom).catch(console.error);
-});
+}
+
+renderLanguages();
 applyI18n();
 
 services = await invoke<Service[]>("list_services");
