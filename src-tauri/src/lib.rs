@@ -202,7 +202,7 @@ fn show_home(app: AppHandle) {
 
 #[tauri::command]
 fn reload_service(app: AppHandle, id: String) -> Result<(), String> {
-    let webview = app.get_webview(&id).ok_or("servicio sin abrir")?;
+    let webview = app.get_webview(&id).ok_or("error.unknownService")?;
     webview.reload().map_err(|e| e.to_string())
 }
 
@@ -262,7 +262,7 @@ fn update_service(
         let service = list
             .iter_mut()
             .find(|s| s.id == id)
-            .ok_or("servicio desconocido")?;
+            .ok_or("error.unknownService")?;
         let url_changed = service.url != url;
         let reopen = url_changed || service.adblock != adblock;
         if !name.trim().is_empty() {
@@ -367,7 +367,7 @@ fn set_service_icon(
         let service = list
             .iter_mut()
             .find(|s| s.id == id)
-            .ok_or("servicio desconocido")?;
+            .ok_or("error.unknownService")?;
         service.icon_source = source;
         service.icon = match source {
             IconSource::Custom => icon,
@@ -572,7 +572,7 @@ fn set_enabled(app: &AppHandle, id: &str, enabled: bool) -> Result<(), String> {
         let service = list
             .iter_mut()
             .find(|s| s.id == id)
-            .ok_or("servicio desconocido")?;
+            .ok_or("error.unknownService")?;
         service.enabled = enabled;
     }
     services_changed(app);

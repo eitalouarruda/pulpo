@@ -185,10 +185,10 @@ pub fn normalize_group(group: Option<String>) -> Option<String> {
 pub fn validate_icon(icon: &str) -> Result<(), String> {
     const MAX: usize = 400 * 1024;
     if !icon.starts_with("data:image/") || !icon.contains(";base64,") {
-        return Err("El icono tiene que ser una imagen".into());
+        return Err("error.iconNotImage".into());
     }
     if icon.len() > MAX {
-        return Err("La imagen es demasiado grande".into());
+        return Err("error.iconTooLarge".into());
     }
     Ok(())
 }
@@ -210,20 +210,21 @@ pub fn new_id(services: &[Service]) -> String {
 }
 
 /// Valida y normaliza la URL que escribe el usuario: sin esquema se asume
-/// https, y solo se aceptan http(s).
+/// https, y solo se aceptan http(s). Los errores son claves `error.*` que
+/// traduce la interfaz.
 pub fn normalize_url(input: &str) -> Result<String, String> {
     let input = input.trim();
     if input.is_empty() {
-        return Err("Falta la dirección".into());
+        return Err("error.urlEmpty".into());
     }
     let with_scheme = if input.contains("://") {
         input.to_string()
     } else {
         format!("https://{input}")
     };
-    let url = tauri::Url::parse(&with_scheme).map_err(|_| "Dirección no válida".to_string())?;
+    let url = tauri::Url::parse(&with_scheme).map_err(|_| "error.urlInvalid".to_string())?;
     if !matches!(url.scheme(), "http" | "https") || url.host_str().is_none() {
-        return Err("La dirección tiene que ser http o https".into());
+        return Err("error.urlScheme".into());
     }
     Ok(url.into())
 }

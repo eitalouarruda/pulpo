@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="es">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no" />
@@ -8,32 +8,32 @@
   </head>
   <body>
     <aside id="sidebar">
-      <button id="home" type="button" title="Inicio (Esc Esc Esc)" aria-label="Inicio">
+      <button id="home" type="button" data-i18n-title="sidebar.home" data-i18n-label="sidebar.home">
         <img src="/pulpo.svg" alt="" draggable="false" />
       </button>
-      <nav id="services" aria-label="Servicios"></nav>
-      <button id="add" type="button" title="Agregar app" aria-label="Agregar app">+</button>
-      <button id="manage" type="button" title="Administrar apps" aria-label="Administrar apps">
+      <nav id="services" data-i18n-label="sidebar.services"></nav>
+      <button id="add" type="button" data-i18n-title="sidebar.add" data-i18n-label="sidebar.add">+</button>
+      <button id="manage" type="button" data-i18n-title="sidebar.manage" data-i18n-label="sidebar.manage">
         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
           <path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3h-4l-.3 2.9a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.4 7.4 0 0 0 1.7 1L11 21h4l.3-2.9a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/>
         </svg>
       </button>
-      <div id="status" role="status" title="Cargando filtros…"></div>
+      <div id="status" role="status"></div>
     </aside>
 
-    <!-- Diálogos: la barra lateral se estira a toda la ventana mientras se ven. -->
+    <!-- Dialogs: the sidebar stretches over the whole window while they show. -->
     <div id="overlay" hidden>
       <section class="card" id="catalog-view" hidden>
         <header>
-          <h2>Agregar app</h2>
-          <input id="search" type="search" placeholder="Buscar…" autocomplete="off" />
+          <h2 data-i18n="catalog.title"></h2>
+          <input id="search" type="search" data-i18n-placeholder="catalog.search" autocomplete="off" />
         </header>
         <div id="catalog" class="grid"></div>
       </section>
 
       <section id="home-view" hidden>
         <div id="home-groups"></div>
-        <p class="home-hint">Dentro de cualquier app, pulsa <kbd>Esc</kbd> tres veces seguidas para volver aquí.</p>
+        <p class="home-hint" data-i18n-html="home.hint"></p>
       </section>
 
       <div class="context-menu" id="menu-view" role="menu" hidden></div>
@@ -41,73 +41,77 @@
       <section class="card disabled-card" id="disabled-view" hidden>
         <span class="m-icon big" id="d-icon"></span>
         <h2 id="d-title"></h2>
-        <p>Está cerrada: no carga ni recibe notificaciones hasta que la actives.</p>
+        <p data-i18n="disabled.body"></p>
         <footer>
-          <button type="button" id="d-enable">Activar</button>
+          <button type="button" id="d-enable" data-i18n="disabled.enable"></button>
         </footer>
       </section>
 
       <section class="card" id="manage-view" hidden>
         <header>
-          <h2>Administrar apps</h2>
-          <button type="button" class="ghost-btn" data-close>Cerrar</button>
+          <h2 data-i18n="manage.title"></h2>
+          <button type="button" class="ghost-btn" data-close data-i18n="manage.close"></button>
         </header>
         <div class="zoom-row">
-          <span>Tamaño en esta pantalla <small id="zoom-monitor"></small></span>
-          <button type="button" class="ghost-btn icon-btn" id="zoom-out" title="Más pequeño (Ctrl −)">−</button>
+          <span><span data-i18n="zoom.label"></span> <small id="zoom-monitor"></small></span>
+          <button type="button" class="ghost-btn icon-btn" id="zoom-out" data-i18n-title="zoom.out">−</button>
           <span id="zoom-value">100 %</span>
-          <button type="button" class="ghost-btn icon-btn" id="zoom-in" title="Más grande (Ctrl +)">+</button>
-          <button type="button" class="ghost-btn" id="zoom-auto" title="Volver al tamaño automático (Ctrl 0)">Automático</button>
+          <button type="button" class="ghost-btn icon-btn" id="zoom-in" data-i18n-title="zoom.in">+</button>
+          <button type="button" class="ghost-btn" id="zoom-auto" data-i18n-title="zoom.reset" data-i18n="zoom.auto"></button>
         </div>
         <ul id="manage-list"></ul>
-        <p class="hint">También con clic derecho sobre un icono de la barra lateral.</p>
+        <div class="zoom-row">
+          <label for="language" class="inline" data-i18n="manage.language"></label>
+          <select id="language"></select>
+        </div>
+        <p class="hint" data-i18n="manage.hint"></p>
       </section>
 
       <form class="card" id="form-view" hidden autocomplete="off">
-        <h2 id="form-title">Nueva app</h2>
+        <h2 id="form-title"></h2>
         <label>
-          Nombre
-          <input id="f-name" type="text" placeholder="Mi app" />
+          <span data-i18n="form.name"></span>
+          <input id="f-name" type="text" data-i18n-placeholder="form.namePlaceholder" />
         </label>
         <label>
-          Dirección
+          <span data-i18n="form.url"></span>
           <input id="f-url" type="text" placeholder="https://…" required />
         </label>
         <label>
-          Grupo
-          <input id="f-group" type="text" list="groups" placeholder="Sin grupo (p. ej. Trabajo, Personal)" />
+          <span data-i18n="form.group"></span>
+          <input id="f-group" type="text" list="groups" data-i18n-placeholder="form.groupPlaceholder" />
           <datalist id="groups"></datalist>
         </label>
         <div class="field">
-          <span class="field-label">Icono</span>
+          <span class="field-label" data-i18n="form.icon"></span>
           <div class="icon-row">
             <span class="service icon-preview" id="f-icon"></span>
-            <button type="button" class="ghost-btn" data-icon="custom">Elegir imagen…</button>
-            <button type="button" class="ghost-btn" data-icon="web">De la web</button>
-            <button type="button" class="ghost-btn" data-icon="letter">Letra</button>
+            <button type="button" class="ghost-btn" data-icon="custom" data-i18n="form.iconCustom"></button>
+            <button type="button" class="ghost-btn" data-icon="web" data-i18n="form.iconWeb"></button>
+            <button type="button" class="ghost-btn" data-icon="letter" data-i18n="form.iconLetter"></button>
             <input id="f-icon-file" type="file" accept="image/*" hidden />
           </div>
         </div>
         <label class="check">
           <input id="f-adblock" type="checkbox" />
           <span>
-            Bloquear anuncios
-            <small>No hace falta en apps de mensajería: sin bloqueo cargan un poco más rápido.</small>
+            <span data-i18n="form.adblock"></span>
+            <small data-i18n="form.adblockHint"></small>
           </span>
         </label>
         <p id="f-error" class="error" role="alert"></p>
         <footer>
-          <button type="button" class="ghost" data-close>Cancelar</button>
-          <button type="submit" id="f-submit">Agregar</button>
+          <button type="button" class="ghost" data-close data-i18n="action.cancel"></button>
+          <button type="submit" id="f-submit"></button>
         </footer>
       </form>
 
       <section class="card" id="confirm-view" hidden>
-        <h2 id="confirm-title">¿Quitar?</h2>
-        <p>Se borran también su sesión y sus datos. No se puede deshacer.</p>
+        <h2 id="confirm-title"></h2>
+        <p data-i18n="confirm.body"></p>
         <footer>
-          <button type="button" class="ghost" data-close>Cancelar</button>
-          <button type="button" class="danger" id="confirm-ok">Quitar</button>
+          <button type="button" class="ghost" data-close data-i18n="action.cancel"></button>
+          <button type="button" class="danger" id="confirm-ok" data-i18n="action.remove"></button>
         </footer>
       </section>
     </div>

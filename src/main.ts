@@ -1,6 +1,8 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
+import { applyI18n, currentLanguage, type Language, LANGUAGES, setLanguage, t, tError } from "./i18n";
+
 interface Service {
   id: string;
   name: string;
@@ -60,14 +62,17 @@ const badges = new Map<string, number>();
 
 // ---------------------------------------------------------------- barra lateral
 
+let lastStatus: BlockerStatus = { state: "loading" };
+
 function showStatus(s: BlockerStatus) {
+  lastStatus = s;
   status.dataset.state = s.state;
   status.title =
     s.state === "loading"
-      ? "Cargando filtros de anuncios…"
+      ? t("status.loading")
       : s.state === "ready"
-        ? "Filtros de anuncios listos"
-        : `Bloqueo de anuncios desactivado: ${s.message}`;
+        ? t("status.ready")
+        : t("status.error", { message: s.message });
 }
 
 function markCurrent() {
@@ -127,7 +132,7 @@ function renderBase(view: View) {
   fillIcon(icon, s);
   icon.classList.remove("letter");
   if (!s.icon) icon.style.background = s.color;
-  $("#d-title").textContent = `${s.name} está desactivada`;
+  $("#d-title").textContent = t("disabled.title", { name: s.name });
 }
 
 /// Pone la vista base al día, salvo que haya un diálogo abierto (al cerrarlo
@@ -156,7 +161,7 @@ function renderHome() {
     section.className = "home-group";
     if (group !== null || groups.size > 1) {
       const h = document.createElement("h3");
-      h.textContent = group ?? "Apps";
+      h.textContent = group ?? t("home.ungrouped");
       section.append(h);
     }
     const grid = document.createElement("div");
@@ -166,7 +171,7 @@ function renderHome() {
       tile.type = "button";
       tile.className = "home-app";
       tile.classList.toggle("disabled", !s.enabled);
-      tile.title = s.enabled ? s.name : `${s.name} (desactivada)`;
+      tile.title = s.enabled ? s.name : t("service.disabledTitle", { name: s.name });
       const icon = document.createElement("span");
       icon.className = "service home-icon";
       fillIcon(icon, s);
@@ -192,7 +197,7 @@ function renderHome() {
   if (sections.length === 0) {
     const empty = document.createElement("p");
     empty.className = "home-empty";
-    empty.textContent = "Todavía no hay apps. Agrega una con el botón +.";
+    empty.textContent = t("home.empty");
     sections.push(empty as unknown as HTMLElement);
   }
   home.replaceChildren(...sections);
@@ -226,7 +231,7 @@ function serviceButton(s: Service, index: number) {
   button.className = "service";
   button.dataset.id = s.id;
   button.draggable = true;
-  button.title = [s.name, index < 9 ? `Ctrl+${index + 1}` : "", s.enabled ? "" : "desactivada"]
+  button.title = [s.name, index < 9 ? `Ctrl+${index + 1}` : "", s.enabled ? "" : t("service.disabled")]
     .filter(Boolean)
     .join(" · ");
   button.setAttribute("aria-current", String(s.id === active));
@@ -277,7 +282,7 @@ function renderSidebar() {
       header.type = "button";
       header.className = "group";
       header.dataset.group = g;
-      header.title = `${g} (clic para ${collapsed.has(g) ? "desplegar" : "plegar"})`;
+      header.title = t(collapsed.has(g) ? "group.toggle.expand" : "group.toggle.collapse", { group: g });
       header.setAttribute("aria-expanded", String(!collapsed.has(g)));
       header.textContent = g;
       const unread = services
@@ -413,9 +418,9 @@ function renderManage() {
       const meta = document.createElement("small");
       meta.textContent = [
         new URL(s.url).host,
-        s.group ? `grupo ${s.group}` : "",
-        s.adblock ? "con bloqueo" : "sin bloqueo",
-        s.enabled ? "" : "desactivada",
+        s.group ? t("manage.group", { group: s.group }) : "",
+        t(s.adblock ? "manage.withAdblock" : "manage.withoutAdblock"),
+        s.enabled ? "" : t("service.disabled"),
       ]
         .filter(Boolean)
         .join(" · ");
@@ -433,8 +438,8 @@ function renderManage() {
       const pos = sameGroup.indexOf(s);
       const up = button("↑", "small icon-btn", () => move(s.id, -1));
       const down = button("↓", "small icon-btn", () => move(s.id, 1));
-      up.title = "Subir";
-      down.title = "Bajar";
+      up.title = t("manage.up");
+      down.title = t("manage.down");
       up.disabled = pos === 0;
       down.disabled = pos === sameGroup.length - 1;
       li.append(
@@ -442,14 +447,14 @@ function renderManage() {
         down,
         icon,
         text,
-        button("Editar", "small", () => {
+        button(t("action.edit"), "small", () => {
           returnTo = "manage";
           openForm(s, s.id);
         }),
-        button(s.enabled ? "Desactivar" : "Activar", "small ghost-btn", () => {
+        button(t(s.enabled ? "action.disable" : "action.enable"), "small ghost-btn", () => {
           invoke("set_service_enabled", { id: s.id, enabled: !s.enabled }).catch(console.error);
         }),
-        button("Quitar", "small danger-btn", () => {
+        button(t("action.remove"), "small danger-btn", () => {
           returnTo = "manage";
           askRemove(s.id);
         }),
@@ -496,11 +501,11 @@ function openMenu(s: Service, top: number, left?: number) {
   title.textContent = s.name;
   menu.replaceChildren(
     title,
-    item("Recargar", () => invoke("reload_service", { id: s.id }).catch(console.error), {
+    item(t("action.reload"), () => invoke("reload_service", { id: s.id }).catch(console.error), {
       disabled: !s.enabled,
     }),
     item(
-      "Bloquear anuncios",
+      t("action.adblock"),
       () =>
         invoke("update_service", {
           id: s.id,
@@ -514,11 +519,11 @@ function openMenu(s: Service, top: number, left?: number) {
       { checked: s.adblock },
     ),
     sep(),
-    item("Editar…", () => openForm(s, s.id), { dialog: true }),
-    item(s.enabled ? "Desactivar" : "Activar", () =>
+    item(t("action.editMenu"), () => openForm(s, s.id), { dialog: true }),
+    item(t(s.enabled ? "action.disable" : "action.enable"), () =>
       invoke("set_service_enabled", { id: s.id, enabled: !s.enabled }).catch(console.error),
     ),
-    item("Quitar…", () => askRemove(s.id), { danger: true, dialog: true }),
+    item(t("action.removeMenu"), () => askRemove(s.id), { danger: true, dialog: true }),
   );
   menu.style.top = `${Math.max(8, Math.min(top, window.innerHeight - 260))}px`;
   menu.style.left = left === undefined ? "" : `${Math.min(left, window.innerWidth - 230)}px`;
@@ -529,7 +534,7 @@ function askRemove(id: string) {
   const s = services.find((s) => s.id === id);
   if (!s) return;
   removing = id;
-  $("#confirm-title").textContent = `¿Quitar ${s.name}?`;
+  $("#confirm-title").textContent = t("confirm.title", { name: s.name });
   openOverlay("confirm");
 }
 
@@ -558,8 +563,8 @@ interface FormInit {
 
 function openForm(init: FormInit, edit: string | null) {
   editing = edit;
-  form.title.textContent = edit ? "Editar app" : "Nueva app";
-  form.submit.textContent = edit ? "Guardar" : "Agregar";
+  form.title.textContent = t(edit ? "form.edit" : "form.new");
+  form.submit.textContent = t(edit ? "action.save" : "action.add");
   form.name.value = init.name;
   form.url.value = init.url;
   form.adblock.checked = init.adblock;
@@ -606,7 +611,7 @@ function loadIcon(file: File): Promise<string> {
     };
     img.onerror = () => {
       URL.revokeObjectURL(url);
-      reject(new Error("No se pudo leer la imagen"));
+      reject(new Error(t("form.imageError")));
     };
     img.src = url;
   });
@@ -656,7 +661,8 @@ function renderCatalog() {
   const custom = document.createElement("button");
   custom.type = "button";
   custom.className = "tile custom";
-  custom.innerHTML = `<span class="tile-icon">+</span><span class="tile-name">Personalizada</span>`;
+  custom.innerHTML = `<span class="tile-icon">+</span><span class="tile-name"></span>`;
+  custom.querySelector(".tile-name")!.textContent = t("catalog.custom");
   custom.addEventListener("click", () =>
     openForm({ name: search.value.trim(), url: "", adblock: true }, null),
   );
@@ -701,7 +707,7 @@ views.form.addEventListener("submit", async (e) => {
     }
     closeOverlay();
   } catch (err) {
-    form.error.textContent = String(err);
+    form.error.textContent = tError(err);
   } finally {
     form.submit.disabled = false;
   }
@@ -724,6 +730,25 @@ $("#sidebar").addEventListener("mousedown", () => {
 });
 
 // ---------------------------------------------------------------- arranque
+
+// ---------------------------------------------------------------- idioma
+
+const languageSelect = $<HTMLSelectElement>("#language");
+languageSelect.replaceChildren(
+  ...LANGUAGES.map((l) => Object.assign(document.createElement("option"), { value: l.value, textContent: l.label })),
+);
+languageSelect.value = currentLanguage();
+languageSelect.addEventListener("change", () => {
+  setLanguage(languageSelect.value as Language);
+  // Los textos que se pintan desde aquí se rehacen con el idioma nuevo.
+  renderSidebar();
+  renderManage();
+  const base = baseView();
+  if (base) renderBase(base);
+  showStatus(lastStatus);
+  invoke<ZoomInfo>("get_zoom").then(showZoom).catch(console.error);
+});
+applyI18n();
 
 services = await invoke<Service[]>("list_services");
 active = await invoke<string | null>("active_service");
@@ -822,7 +847,9 @@ interface ZoomInfo {
 
 function showZoom(z: ZoomInfo) {
   $("#zoom-value").textContent = `${Math.round(z.zoom * 100)} %`;
-  $("#zoom-monitor").textContent = z.monitor ? `(${z.monitor}${z.auto ? ", automático" : ""})` : "";
+  $("#zoom-monitor").textContent = z.monitor
+    ? `(${z.monitor}${z.auto ? `, ${t("zoom.autoShort")}` : ""})`
+    : "";
   $<HTMLButtonElement>("#zoom-auto").disabled = z.auto;
 }
 

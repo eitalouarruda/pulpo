@@ -1,0 +1,319 @@
+/** Interface languages. English is the default and the source of the keys. */
+
+const en = {
+  "sidebar.home": "Home (Esc Esc Esc)",
+  "sidebar.services": "Apps",
+  "sidebar.add": "Add app",
+  "sidebar.manage": "Manage apps",
+  "status.loading": "Loading ad filters…",
+  "status.ready": "Ad filters ready",
+  "status.error": "Ad blocking disabled: {message}",
+
+  "home.ungrouped": "Apps",
+  "home.empty": "No apps yet. Add one with the + button.",
+  "home.hint": "Inside any app, press <kbd>Esc</kbd> three times in a row to come back here.",
+
+  "service.disabled": "disabled",
+  "service.disabledTitle": "{name} (disabled)",
+  "group.toggle.collapse": "{group} (click to collapse)",
+  "group.toggle.expand": "{group} (click to expand)",
+
+  "catalog.title": "Add app",
+  "catalog.search": "Search…",
+  "catalog.custom": "Custom",
+
+  "disabled.title": "{name} is disabled",
+  "disabled.body": "It is closed: it doesn't load or get notifications until you enable it.",
+  "disabled.enable": "Enable",
+
+  "manage.title": "Manage apps",
+  "manage.close": "Close",
+  "manage.hint": "Also available by right-clicking an icon in the sidebar.",
+  "manage.up": "Move up",
+  "manage.down": "Move down",
+  "manage.group": "group {group}",
+  "manage.withAdblock": "ad blocking",
+  "manage.withoutAdblock": "no ad blocking",
+  "manage.language": "Language",
+  "zoom.label": "Size on this screen",
+  "zoom.auto": "Automatic",
+  "zoom.autoShort": "automatic",
+  "zoom.in": "Bigger (Ctrl +)",
+  "zoom.out": "Smaller (Ctrl −)",
+  "zoom.reset": "Back to the automatic size (Ctrl 0)",
+
+  "action.edit": "Edit",
+  "action.editMenu": "Edit…",
+  "action.enable": "Enable",
+  "action.disable": "Disable",
+  "action.remove": "Remove",
+  "action.removeMenu": "Remove…",
+  "action.reload": "Reload",
+  "action.adblock": "Block ads",
+  "action.cancel": "Cancel",
+  "action.save": "Save",
+  "action.add": "Add",
+
+  "form.new": "New app",
+  "form.edit": "Edit app",
+  "form.name": "Name",
+  "form.namePlaceholder": "My app",
+  "form.url": "Address",
+  "form.group": "Group",
+  "form.groupPlaceholder": "No group (e.g. Work, Personal)",
+  "form.icon": "Icon",
+  "form.iconCustom": "Choose image…",
+  "form.iconWeb": "From the site",
+  "form.iconLetter": "Letter",
+  "form.adblock": "Block ads",
+  "form.adblockHint": "Not needed for messaging apps: without blocking they load a bit faster.",
+  "form.imageError": "Couldn't read the image",
+
+  "confirm.title": "Remove {name}?",
+  "confirm.body": "Its session and data are deleted too. This can't be undone.",
+
+  "error.urlEmpty": "The address is missing",
+  "error.urlInvalid": "Invalid address",
+  "error.urlScheme": "The address has to be http or https",
+  "error.iconNotImage": "The icon has to be an image",
+  "error.iconTooLarge": "The image is too large",
+  "error.unknownService": "Unknown app",
+};
+
+export type MessageKey = keyof typeof en;
+type Dictionary = Record<MessageKey, string>;
+
+const es: Dictionary = {
+  "sidebar.home": "Inicio (Esc Esc Esc)",
+  "sidebar.services": "Apps",
+  "sidebar.add": "Agregar app",
+  "sidebar.manage": "Administrar apps",
+  "status.loading": "Cargando filtros de anuncios…",
+  "status.ready": "Filtros de anuncios listos",
+  "status.error": "Bloqueo de anuncios desactivado: {message}",
+
+  "home.ungrouped": "Apps",
+  "home.empty": "Todavía no hay apps. Agrega una con el botón +.",
+  "home.hint": "Dentro de cualquier app, pulsa <kbd>Esc</kbd> tres veces seguidas para volver aquí.",
+
+  "service.disabled": "desactivada",
+  "service.disabledTitle": "{name} (desactivada)",
+  "group.toggle.collapse": "{group} (clic para plegar)",
+  "group.toggle.expand": "{group} (clic para desplegar)",
+
+  "catalog.title": "Agregar app",
+  "catalog.search": "Buscar…",
+  "catalog.custom": "Personalizada",
+
+  "disabled.title": "{name} está desactivada",
+  "disabled.body": "Está cerrada: no carga ni recibe notificaciones hasta que la actives.",
+  "disabled.enable": "Activar",
+
+  "manage.title": "Administrar apps",
+  "manage.close": "Cerrar",
+  "manage.hint": "También con clic derecho sobre un icono de la barra lateral.",
+  "manage.up": "Subir",
+  "manage.down": "Bajar",
+  "manage.group": "grupo {group}",
+  "manage.withAdblock": "con bloqueo",
+  "manage.withoutAdblock": "sin bloqueo",
+  "manage.language": "Idioma",
+  "zoom.label": "Tamaño en esta pantalla",
+  "zoom.auto": "Automático",
+  "zoom.autoShort": "automático",
+  "zoom.in": "Más grande (Ctrl +)",
+  "zoom.out": "Más pequeño (Ctrl −)",
+  "zoom.reset": "Volver al tamaño automático (Ctrl 0)",
+
+  "action.edit": "Editar",
+  "action.editMenu": "Editar…",
+  "action.enable": "Activar",
+  "action.disable": "Desactivar",
+  "action.remove": "Quitar",
+  "action.removeMenu": "Quitar…",
+  "action.reload": "Recargar",
+  "action.adblock": "Bloquear anuncios",
+  "action.cancel": "Cancelar",
+  "action.save": "Guardar",
+  "action.add": "Agregar",
+
+  "form.new": "Nueva app",
+  "form.edit": "Editar app",
+  "form.name": "Nombre",
+  "form.namePlaceholder": "Mi app",
+  "form.url": "Dirección",
+  "form.group": "Grupo",
+  "form.groupPlaceholder": "Sin grupo (p. ej. Trabajo, Personal)",
+  "form.icon": "Icono",
+  "form.iconCustom": "Elegir imagen…",
+  "form.iconWeb": "De la web",
+  "form.iconLetter": "Letra",
+  "form.adblock": "Bloquear anuncios",
+  "form.adblockHint": "No hace falta en apps de mensajería: sin bloqueo cargan un poco más rápido.",
+  "form.imageError": "No se pudo leer la imagen",
+
+  "confirm.title": "¿Quitar {name}?",
+  "confirm.body": "Se borran también su sesión y sus datos. No se puede deshacer.",
+
+  "error.urlEmpty": "Falta la dirección",
+  "error.urlInvalid": "Dirección no válida",
+  "error.urlScheme": "La dirección tiene que ser http o https",
+  "error.iconNotImage": "El icono tiene que ser una imagen",
+  "error.iconTooLarge": "La imagen es demasiado grande",
+  "error.unknownService": "App desconocida",
+};
+
+const pt: Dictionary = {
+  "sidebar.home": "Início (Esc Esc Esc)",
+  "sidebar.services": "Apps",
+  "sidebar.add": "Adicionar app",
+  "sidebar.manage": "Gerenciar apps",
+  "status.loading": "Carregando filtros de anúncios…",
+  "status.ready": "Filtros de anúncios prontos",
+  "status.error": "Bloqueio de anúncios desativado: {message}",
+
+  "home.ungrouped": "Apps",
+  "home.empty": "Ainda não há apps. Adicione uma com o botão +.",
+  "home.hint": "Dentro de qualquer app, aperte <kbd>Esc</kbd> três vezes seguidas para voltar aqui.",
+
+  "service.disabled": "desativado",
+  "service.disabledTitle": "{name} (desativado)",
+  "group.toggle.collapse": "{group} (clique para recolher)",
+  "group.toggle.expand": "{group} (clique para expandir)",
+
+  "catalog.title": "Adicionar app",
+  "catalog.search": "Buscar…",
+  "catalog.custom": "Personalizado",
+
+  "disabled.title": "{name} está desativado",
+  "disabled.body": "Está fechado: não carrega nem recebe notificações até você ativá-lo.",
+  "disabled.enable": "Ativar",
+
+  "manage.title": "Gerenciar apps",
+  "manage.close": "Fechar",
+  "manage.hint": "Também com clique direito em um ícone da barra lateral.",
+  "manage.up": "Subir",
+  "manage.down": "Descer",
+  "manage.group": "grupo {group}",
+  "manage.withAdblock": "com bloqueio",
+  "manage.withoutAdblock": "sem bloqueio",
+  "manage.language": "Idioma",
+  "zoom.label": "Tamanho nesta tela",
+  "zoom.auto": "Automático",
+  "zoom.autoShort": "automático",
+  "zoom.in": "Maior (Ctrl +)",
+  "zoom.out": "Menor (Ctrl −)",
+  "zoom.reset": "Voltar ao tamanho automático (Ctrl 0)",
+
+  "action.edit": "Editar",
+  "action.editMenu": "Editar…",
+  "action.enable": "Ativar",
+  "action.disable": "Desativar",
+  "action.remove": "Remover",
+  "action.removeMenu": "Remover…",
+  "action.reload": "Recarregar",
+  "action.adblock": "Bloquear anúncios",
+  "action.cancel": "Cancelar",
+  "action.save": "Salvar",
+  "action.add": "Adicionar",
+
+  "form.new": "Novo app",
+  "form.edit": "Editar app",
+  "form.name": "Nome",
+  "form.namePlaceholder": "Meu app",
+  "form.url": "Endereço",
+  "form.group": "Grupo",
+  "form.groupPlaceholder": "Sem grupo (ex.: Trabalho, Pessoal)",
+  "form.icon": "Ícone",
+  "form.iconCustom": "Escolher imagem…",
+  "form.iconWeb": "Do site",
+  "form.iconLetter": "Letra",
+  "form.adblock": "Bloquear anúncios",
+  "form.adblockHint": "Não é necessário em apps de mensagens: sem bloqueio carregam um pouco mais rápido.",
+  "form.imageError": "Não foi possível ler a imagem",
+
+  "confirm.title": "Remover {name}?",
+  "confirm.body": "A sessão e os dados também são apagados. Não dá para desfazer.",
+
+  "error.urlEmpty": "Falta o endereço",
+  "error.urlInvalid": "Endereço inválido",
+  "error.urlScheme": "O endereço tem que ser http ou https",
+  "error.iconNotImage": "O ícone tem que ser uma imagem",
+  "error.iconTooLarge": "A imagem é grande demais",
+  "error.unknownService": "App desconhecido",
+};
+
+export type Language = "en" | "es" | "pt";
+
+const DICTIONARIES: Record<Language, Dictionary> = { en, es, pt };
+
+export const LANGUAGES: { value: Language; label: string }[] = [
+  { value: "en", label: "English" },
+  { value: "pt", label: "Português" },
+  { value: "es", label: "Español" },
+];
+
+const STORAGE_KEY = "pulpo.language";
+
+function loadLanguage(): Language {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY);
+    if (saved && saved in DICTIONARIES) return saved as Language;
+  } catch {
+    /* no storage: default */
+  }
+  return "en";
+}
+
+let language: Language = loadLanguage();
+
+export const currentLanguage = () => language;
+
+export function setLanguage(lang: Language) {
+  language = lang;
+  try {
+    localStorage.setItem(STORAGE_KEY, lang);
+  } catch {
+    /* not remembered */
+  }
+  applyI18n();
+}
+
+/** Translates `key`, replacing `{var}`. */
+export function t(key: MessageKey, vars?: Record<string, string | number>): string {
+  let text = DICTIONARIES[language][key] ?? en[key] ?? key;
+  if (vars) {
+    for (const [k, v] of Object.entries(vars)) text = text.split(`{${k}}`).join(String(v));
+  }
+  return text;
+}
+
+/** Translates an error from the backend: they come as `error.*` keys. */
+export function tError(err: unknown): string {
+  const message = String(err);
+  return message in en ? t(message as MessageKey) : message;
+}
+
+/**
+ * Translates the static markup: `data-i18n` (text), `data-i18n-html` (markup
+ * with <kbd>), `data-i18n-title`, `data-i18n-placeholder` and
+ * `data-i18n-label` (aria-label).
+ */
+export function applyI18n(root: ParentNode = document) {
+  document.documentElement.lang = language;
+  for (const el of root.querySelectorAll<HTMLElement>("[data-i18n]")) {
+    el.textContent = t(el.dataset.i18n as MessageKey);
+  }
+  for (const el of root.querySelectorAll<HTMLElement>("[data-i18n-html]")) {
+    el.innerHTML = t(el.dataset.i18nHtml as MessageKey);
+  }
+  for (const el of root.querySelectorAll<HTMLElement>("[data-i18n-title]")) {
+    el.title = t(el.dataset.i18nTitle as MessageKey);
+  }
+  for (const el of root.querySelectorAll<HTMLInputElement>("[data-i18n-placeholder]")) {
+    el.placeholder = t(el.dataset.i18nPlaceholder as MessageKey);
+  }
+  for (const el of root.querySelectorAll<HTMLElement>("[data-i18n-label]")) {
+    el.setAttribute("aria-label", t(el.dataset.i18nLabel as MessageKey));
+  }
+}

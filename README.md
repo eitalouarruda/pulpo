@@ -5,95 +5,166 @@
 <h1 align="center">Pulpo</h1>
 
 <p align="center">
-  Tus apps web en una sola ventana, sin anuncios.<br />
-  Rust + Tauri para Linux y Windows, con el motor de bloqueo de Brave.
+  All your web apps in one window, without ads.<br />
+  Built with Rust and Tauri for Linux and Windows, with Brave's ad-blocking engine.
+</p>
+
+<p align="center">
+  <img src="docs/screenshots/home.png" alt="Pulpo's home page with apps grouped into Messaging, Work and Music, with unread counters" width="900" />
 </p>
 
 ---
 
-Pulpo junta servicios web (por ahora **WhatsApp** y **YouTube Music**) en una
-ventana con barra lateral, al estilo Rambox, pero sin Electron ni Node.js: la
-app es Rust ([Tauri 3](https://v3.tauri.app)) y las webs corren en Chromium.
-En Linux se incluye Chromium (CEF), porque WebKitGTK navegaba ~3 veces más
-lento; en Windows se usa WebView2, que ya es Chromium y viene con el sistema.
+Pulpo puts WhatsApp, Telegram, Slack, YouTube Music or any other web app in a
+single window with a sidebar, like Rambox, but without Electron or Node.js.
+The app itself is Rust ([Tauri 3](https://v3.tauri.app)) and the web apps run
+in Chromium, so they feel as fast as in a browser. Each app gets its own
+session, and ads are blocked with the same engine and filter lists as Brave.
 
-## Apps
+## Highlights
 
-Pulpo arranca en una **página inicial** con todas las apps por grupo y sus
-contadores de no leídos. Se vuelve a ella con el pulpo de arriba de la barra
-lateral o pulsando **Esc tres veces seguidas** dentro de cualquier app.
+- **Any web app.** Pick one from the built-in catalog (WhatsApp, Telegram,
+  Discord, Slack, Messenger, Instagram, Teams, Gmail, Outlook, Google
+  Calendar, YouTube Music, YouTube, X, LinkedIn, ChatGPT, Claude, Notion,
+  Trello, GitHub) or add any address you like.
+- **Ad blocking per app.** Brave's engine
+  ([adblock-rust](https://github.com/brave/adblock-rust)) with the uBlock
+  Origin, EasyList, EasyPrivacy and Brave lists, including the uBO scriptlets
+  that remove YouTube ads. Turn it off for apps that don't need it (like
+  messaging apps) and they load a bit faster.
+- **Home page.** Every app at a glance, grouped, with unread counters. Press
+  <kbd>Esc</kbd> three times inside any app to get back to it.
+- **Groups and your own order.** Put apps in groups (Work, Personal…),
+  collapse them, and drag icons to reorder them.
+- **Your icons.** The site's own icon is downloaded automatically; you can also
+  pick any image or just use a colored letter.
+- **Disable without removing.** A disabled app is fully closed: it doesn't
+  load, use memory or get notifications until you enable it again.
+- **Separate sessions.** Each app has its own profile (cookies, logins,
+  cache). Google, Apple, Microsoft or GitHub sign-in pop-ups open inside Pulpo
+  so logins complete in the right app.
+- **Rambox-style shortcuts** that also work while you're typing inside an app.
+- **Right size on every screen.** On Linux with Hyprland's
+  `xwayland:force_zero_scaling` (Omarchy), Pulpo applies each screen's scale
+  itself and switches it when you move the window between screens.
+- **English, Português, Español.**
 
-Atajos (funcionan también con el foco dentro de una app):
+<p align="center">
+  <img src="docs/screenshots/app.png" alt="YouTube Music open in Pulpo, without ads" width="900" />
+</p>
 
-| Atajo | Acción |
+<table>
+  <tr>
+    <td><img src="docs/screenshots/catalog.png" alt="Add app dialog with the catalog of known apps and a Custom option" /></td>
+    <td><img src="docs/screenshots/form.png" alt="Edit app dialog: name, address, group, icon and ad blocking" /></td>
+  </tr>
+  <tr>
+    <td align="center">Add an app from the catalog or any address</td>
+    <td align="center">Name, address, group, icon and ad blocking per app</td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/menu.png" alt="Right-click menu on an app: reload, block ads, edit, disable, remove" /></td>
+    <td></td>
+  </tr>
+  <tr>
+    <td align="center">Right-click an app for quick actions</td>
+    <td></td>
+  </tr>
+</table>
+
+## Keyboard shortcuts
+
+They work from the sidebar and also with the focus inside an app.
+
+| Shortcut | Action |
 | --- | --- |
-| `Ctrl` `Ctrl` (dos toques) | Alterna entre las dos últimas apps |
-| `Ctrl+1` … `Ctrl+9` | Va a la app en esa posición de la barra lateral |
-| `Esc` `Esc` `Esc` | Página inicial |
+| <kbd>Ctrl</kbd> <kbd>Ctrl</kbd> (tap twice) | Switch between the last two apps |
+| <kbd>Ctrl</kbd>+<kbd>1</kbd> … <kbd>Ctrl</kbd>+<kbd>9</kbd> | Go to the app at that position in the sidebar |
+| <kbd>Esc</kbd> <kbd>Esc</kbd> <kbd>Esc</kbd> | Home page |
+| <kbd>Ctrl</kbd>+<kbd>+</kbd> / <kbd>Ctrl</kbd>+<kbd>-</kbd> / <kbd>Ctrl</kbd>+<kbd>0</kbd> | Bigger / smaller / automatic size on this screen (sidebar focused) |
+| Middle click on an icon | Reload the app |
 
-Se agregan con **+** (catálogo o una URL cualquiera) y se administran con
-**⚙** o con clic derecho sobre su icono: recargar, bloqueo de anuncios,
-editar (nombre, dirección, grupo, icono), desactivar y quitar. Una app
-desactivada queda cerrada: no carga ni recibe notificaciones.
+## Managing apps
 
-El orden y los grupos se cambian arrastrando los iconos (soltar sobre el
-título de un grupo mete la app en él), con ↑/↓ en **⚙** o editando
-`~/.local/share/com.pulpo.app/services.json` **con Pulpo cerrado**: el orden
-del archivo es el de la barra lateral, y `"group"` agrupa las apps (las que no
-tienen grupo van arriba). Los grupos se pliegan con un clic en su título.
+- **+** adds an app; **⚙** opens *Manage apps* (edit, enable/disable, remove,
+  move up/down, screen size, language). Right-clicking an icon gives the same
+  options.
+- **Order and groups**: drag icons in the sidebar (dropping one on a group
+  title moves it into that group), use ↑/↓ in *Manage apps*, or edit
+  `~/.local/share/com.pulpo.app/services.json` while Pulpo is closed: the file
+  order is the sidebar order and `"group"` groups apps (apps without a group
+  go first).
+- **Removing** an app also deletes its session and data.
+- **Links** that open a new window go to your default browser, except sign-in
+  pop-ups, which stay in Pulpo.
 
-Los logins con Google, Apple, Microsoft, GitHub… se abren en una ventana de
-Pulpo, con la sesión de la app; el resto de enlaces que abren ventana nueva van
-al navegador del sistema.
+## Install
 
-## Tamaño por pantalla
+Download the latest release from
+[Releases](https://github.com/eitalouarruda/pulpo/releases/latest):
 
-En Linux Pulpo corre por XWayland. Con Hyprland y
-`xwayland:force_zero_scaling = true` (Omarchy) las apps X11 no se escalan, así
-que Pulpo aplica él mismo la escala de la pantalla donde está la ventana (p.
-ej. 160 % en un portátil a 1,6) y la cambia al moverla de pantalla. Se ajusta
-por pantalla con `Ctrl +` / `Ctrl -` / `Ctrl 0` (automático) o en **⚙**; se
-guarda en `settings.json`.
+- **Linux**: `Pulpo_<version>_amd64.AppImage`. Make it executable and run it,
+  or open it with AppImageLauncher / Gear Lever to integrate it into your
+  menu. It bundles its own Chromium, so it works on any recent distro.
+- **Windows**: `Pulpo_<version>_x64-setup.exe` (or the `.msi`). It uses
+  WebView2, which already comes with Windows.
 
-## Bloqueo de anuncios
+## How ad blocking works
 
-Usa [adblock-rust](https://github.com/brave/adblock-rust), el motor de Brave,
-con las mismas listas que Brave activa por defecto (uBlock Origin, EasyList,
-EasyPrivacy y las de Brave). Las listas se descargan al arrancar y se
-refrescan una vez al día (`~/.cache/com.pulpo.app/filter-lists`).
+Lists are downloaded at startup and refreshed once a day
+(`~/.cache/com.pulpo.app/filter-lists`).
 
-| Capa | Linux (CEF) | Windows (WebView2) |
+| Layer | Linux (CEF) | Windows (WebView2) |
 | --- | --- | --- |
-| Red (peticiones a dominios de anuncios) | Dominio `Fetch` del DevTools Protocol + motor de Brave en cada petición | `WebResourceRequested` + motor de Brave en cada petición |
-| Cosmético (ocultar elementos) | CSS inyectado al inicio de cada documento | igual |
-| Scriptlets de uBO (`+js(...)`) | Inyectados al inicio de cada documento | igual |
+| Network (requests to ad and tracker domains) | DevTools Protocol `Fetch` domain + Brave's engine for every request | `WebResourceRequested` + Brave's engine for every request |
+| Cosmetic (hide ad elements) | CSS injected at the start of every document | same |
+| uBO scriptlets (`+js(...)`) | Injected at the start of every document | same |
 
-Los anuncios de YouTube no se pueden bloquear por URL: vienen dentro de las
-respuestas del reproductor. Los quitan los scriptlets de uBlock Origin
-(`json-prune`, `set-constant`, …), igual que en Brave. Se generan desde el
-código de uBO con:
-
-```sh
-pnpm update-ubo        # o: node scripts/update-ubo-resources.mjs <tag>
-```
-
-## Desarrollo
+YouTube ads can't be blocked by URL because they come inside the player
+responses; the uBlock Origin scriptlets (`json-prune`, `set-constant`, …)
+remove them, just like in Brave. They are generated from uBO's source with:
 
 ```sh
-./dev.sh
+pnpm update-ubo        # or: node scripts/update-ubo-resources.mjs <tag>
 ```
 
-Ver qué haría el bloqueador en una página, con las listas reales:
+## Why Chromium on Linux
+
+Tauri normally uses the system web view, which on Linux is WebKitGTK. In
+benchmarks navigating YouTube Music it was about 3× slower than Chromium, so
+Pulpo uses Tauri 3's CEF runtime on Linux. On Windows WebView2 is already
+Chromium.
+
+On Linux Pulpo runs through XWayland. With Hyprland and
+`xwayland:force_zero_scaling = true`, X11 apps aren't scaled, so Pulpo asks
+Hyprland for the scale of the screen the window is on and applies it as zoom
+(e.g. 160 % on a laptop at 1.6). You can override it per screen; it's stored
+in `settings.json`.
+
+## Development
+
+Requirements: Rust, Node.js with pnpm, and on Linux GTK 4.12+, CMake and
+Ninja (the Chromium/CEF distribution is downloaded on the first build, about
+1 GB).
+
+```sh
+./dev.sh               # pnpm install if needed, then tauri dev
+./dev.sh --update-ubo  # regenerate the uBlock Origin scriptlets first
+./dev.sh --bench       # YouTube Music navigation benchmark
+```
+
+See what the blocker would do on a page, with the real lists:
 
 ```sh
 cd src-tauri
 cargo run --release -p blocker --example inspect --features content-blocking -- https://music.youtube.com/
 ```
 
-Cada push a `main` publica una release en GitHub con el AppImage (Linux) y los
-instaladores `.exe`/`.msi` (Windows).
+Every push to `main` builds and publishes a GitHub release with the AppImage
+(built on Arch and smoke-tested on Ubuntu before publishing) and the Windows
+installers.
 
-## Licencias
+## Licenses
 
-`src-tauri/crates/blocker/resources/ubo-resources.json` contiene los
-scriptlets de uBlock Origin (GPL-3.0). adblock-rust es MPL-2.0.
+`src-tauri/crates/blocker/resources/ubo-resources.json` contains uBlock
+Origin's scriptlets (GPL-3.0). adblock-rust is MPL-2.0.

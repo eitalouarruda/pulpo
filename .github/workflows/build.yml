@@ -118,7 +118,9 @@ jobs:
         run: |
           pacman -Syu --noconfirm --needed \
             git base-devel rust nodejs npm gtk4 librsvg patchelf cmake ninja \
-            xorg-server-xvfb xorg-xauth dbus mesa nss strace wget python file
+            xorg-server-xvfb xorg-xauth dbus mesa nss strace wget python file \
+            alsa-lib libcups at-spi2-core nspr libdrm libglvnd vulkan-icd-loader \
+            libxkbcommon libxcomposite libxdamage libxrandr libxcursor libxinerama libxi
           npm install -g pnpm@11.6.0
           # Chromium no arranca como root, y el empaquetador lo ejecuta para
           # descubrir qué librerías carga: el build va con un usuario normal.
@@ -133,11 +135,15 @@ jobs:
       - name: Build AppImage
         run: |
           chown -R builder "$GITHUB_WORKSPACE" "$CEF_PATH"
+          # DEPLOY_CHROMIUM: quick-sharun mete NSS completo, OpenGL, Vulkan y
+          # PipeWire, que Chromium carga en tiempo de ejecución (con solo
+          # rastrear la app bajo Xvfb no los detecta todos).
           runuser -u builder -- env HOME=/home/builder CEF_PATH="$CEF_PATH" VERSION="$VERSION" \
             WORKDIR="$GITHUB_WORKSPACE" \
             ANYLINUX_LIB_SOURCE="$ANYLINUX_BASE/lib/anylinux.c" \
             GTK_CLASS_FIX_SOURCE="$ANYLINUX_BASE/lib/gtk-class-fix.c" \
             HOOKSRC="$ANYLINUX_BASE/hooks" \
+            DEPLOY_CHROMIUM=1 \
             bash -euo pipefail -c '
               cd "$WORKDIR"
               node -e "
@@ -151,6 +157,15 @@ jobs:
               pnpm tauri build --bundles appimage
             '
 
+      # Si el empaquetador dice "missing libraries", aquí se ve cuáles.
+      - name: Show missing libraries
+        if: failure()
+        run: |
+          cd src-tauri/target/release
+          for f in pulpo libcef.so libEGL.so libGLESv2.so libvk_swiftshader.so; do
+            [ -e "$f" ] && ldd "$f" | grep "not found" | sed "s|^|$f: |" || true
+          done
+
       # quick-sharun empaqueta con DwarFS, que AppImageLauncher (y otras
       # herramientas de integración) no saben abrir: "sqfs_open_image error" y
       # la AppImage ni se instala ni arranca. Se reempaqueta el mismo AppDir
@@ -162,8 +177,14 @@ jobs:
           cd src-tauri/target/release/bundle/appimage
           img=$(ls *.AppImage)
           echo "librerías empaquetadas: $(ls Pulpo.AppDir/lib | wc -l)"
-          # Sin estas, la app carga las del sistema y se cae si no coinciden.
-          for lib in libnss3.so libsoftokn3.so libfreeblpriv3.so libGLX_mesa.so.0; do
+          # NSS carga sus módulos (softokn, freebl) en tiempo de ejecución y
+          # el empaquetador no siempre los detecta. Si faltan, la app usa los
+          # del sistema con el libnssutil3 empaquetado y Chromium aborta si las
+          # versiones no coinciden. Se copian los de este mismo NSS.
+          for lib in libsoftokn3.so libfreeblpriv3.so libfreebl3.so libsqlite3.so.0; do
+            [ -e "Pulpo.AppDir/lib/$lib" ] || cp -L "/usr/lib/$lib" Pulpo.AppDir/lib/
+          done
+          for lib in libnss3.so libnssutil3.so libsoftokn3.so libfreeblpriv3.so; do
             test -e "Pulpo.AppDir/lib/$lib" || { echo "Falta $lib en la AppImage"; exit 1; }
           done
           # El .desktop pide el icono "pulpo" y el AppDir lo trae como Pulpo.png.
