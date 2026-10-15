@@ -851,3 +851,57 @@ body.split #overlay.home-mode {
   height: 50%;
   border-bottom: 1px solid var(--line);
 }
+
+/* Página inicial compacta cuando comparte la pantalla con una app: grupos uno
+   al lado del otro e iconos más pequeños, para que quepa sin scroll. */
+body.split #home-view {
+  padding: 12px 8px;
+  gap: 8px;
+}
+
+body.split #home-groups {
+  flex-direction: row;
+  flex-wrap: wrap;
+  gap: 10px 32px;
+}
+
+body.split .home-group h3 {
+  margin-bottom: 4px;
+  font-size: 11px;
+}
+
+body.split .home-grid {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+body.split .home-app {
+  width: 72px;
+}
+
+body.split .home-app {
+  gap: 4px;
+  padding: 6px 2px;
+}
+
+body.split .home-app .home-icon {
+  width: 40px;
+  height: 40px;
+  padding: 7px;
+  border-radius: 12px;
+  font-size: 16px;
+}
+
+body.split .home-app .home-icon img {
+  width: 26px;
+  height: 26px;
+}
+
+body.split .home-name {
+  font-size: 11px;
+}
+
+body.split .home-hint {
+  display: none;
+}
