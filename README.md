@@ -34,6 +34,10 @@ session, and ads are blocked with the same engine and filter lists as Brave.
   messaging apps) and they load a bit faster.
 - **Home page.** Every app at a glance, grouped, with unread counters. Press
   <kbd>Esc</kbd> three times inside any app to get back to it.
+- **One app on the home page.** Optionally pick one app to show in the bottom
+  half of the home page (⚙ → *App on the home page*, or right-click → *Show on
+  home page*). It's a second view of that app with the same session, so it's
+  still available full size from its own button.
 - **Groups and your own order.** Put apps in groups (Work, Personal…),
   collapse them, and drag icons to reorder them.
 - **Your icons.** The site's own icon is downloaded automatically; you can also

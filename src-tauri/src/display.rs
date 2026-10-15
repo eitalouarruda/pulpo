@@ -1,3 +1,5 @@
+//! Ajustes de la interfaz: tamaño por pantalla y app de la página inicial.
+//!
 //! Tamaño de la interfaz por pantalla.
 //!
 //! En Linux Pulpo corre por XWayland (el Chromium embebido usa X11). Con
@@ -20,6 +22,9 @@ pub struct Settings {
     /// Zoom elegido por el usuario, por nombre de pantalla (`eDP-1`, …).
     #[serde(default)]
     pub zoom: HashMap<String, f64>,
+    /// App que se ve en la mitad inferior de la página inicial.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub home_app: Option<String>,
 }
 
 pub fn settings_path(data_dir: &Path) -> PathBuf {

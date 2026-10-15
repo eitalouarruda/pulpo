@@ -832,3 +832,22 @@ kbd {
   color: var(--fg);
   background: var(--panel);
 }
+
+/* ------------------------------------------------------------ app en la página inicial */
+
+.segmented.wrap {
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+
+.home-app-row > span:first-child {
+  flex: none;
+}
+
+/* Con una app elegida, la página inicial ocupa la mitad de arriba: la de
+   abajo la tapa el webview de esa app. */
+body.split #overlay.home-mode {
+  align-self: flex-start;
+  height: 50%;
+  border-bottom: 1px solid var(--line);
+}

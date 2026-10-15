@@ -57,6 +57,8 @@ const form = {
 };
 
 let services: Service[] = [];
+/// App de la mitad inferior de la página inicial (null: ninguna).
+let homeApp: string | null = null;
 let active: string | null = null;
 const badges = new Map<string, number>();
 
@@ -341,8 +343,20 @@ let editing: string | null = null;
 let returnTo: View | null = null;
 let removing: string | null = null;
 
+/// Avisa al backend si se ve la página inicial sin diálogos: solo entonces
+/// se muestra la app de abajo (un diálogo ocupa toda la ventana).
+let paneVisible = false;
+function syncHomePane() {
+  const visible = !overlay.hidden && currentView() === "home";
+  document.body.classList.toggle("split", homeApp !== null && visible);
+  if (visible === paneVisible) return;
+  paneVisible = visible;
+  invoke("set_home_pane_visible", { visible }).catch(console.error);
+}
+
 function openOverlay(view: View) {
   for (const [name, el] of Object.entries(views)) el.hidden = name !== view;
+  if (!overlay.hidden) syncHomePane();
   overlay.classList.toggle("menu-mode", view === "menu");
   overlay.classList.toggle("home-mode", view === "home");
   if (!overlay.hidden) return;
@@ -351,6 +365,7 @@ function openOverlay(view: View) {
     .finally(() => {
       overlay.hidden = false;
       document.body.classList.add("overlay-open");
+      syncHomePane();
       if (!isBase(view)) {
         (views[view].querySelector("input, button:not(.ghost)") as HTMLElement | null)?.focus();
       }
@@ -359,6 +374,7 @@ function openOverlay(view: View) {
 
 function hideOverlay() {
   overlay.hidden = true;
+  syncHomePane();
   document.body.classList.remove("overlay-open");
   invoke("set_overlay", { open: false }).catch(console.error);
 }
@@ -394,7 +410,33 @@ function currentView(): View | null {
   return null;
 }
 
+function renderHomeAppChoice() {
+  const box = $("#home-app");
+  const choice = (id: string | null, label: string) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.role = "radio";
+    b.className = "ghost-btn";
+    b.textContent = label;
+    b.setAttribute("aria-checked", String(id === homeApp));
+    b.addEventListener("click", () => setHomeApp(id));
+    return b;
+  };
+  box.replaceChildren(
+    choice(null, t("manage.homeAppNone")),
+    ...services.filter((s) => s.enabled).map((s) => choice(s.id, s.name)),
+  );
+}
+
+function setHomeApp(id: string | null) {
+  homeApp = id;
+  renderHomeAppChoice();
+  syncHomePane();
+  invoke("set_home_app", { id }).catch(console.error);
+}
+
 function renderManage() {
+  renderHomeAppChoice();
   const list = $("#manage-list");
   list.replaceChildren(
     ...services.map((s) => {
@@ -518,6 +560,10 @@ function openMenu(s: Service, top: number, left?: number) {
         ),
       { checked: s.adblock },
     ),
+    item(t("action.homeApp"), () => setHomeApp(homeApp === s.id ? null : s.id), {
+      checked: homeApp === s.id,
+      disabled: !s.enabled,
+    }),
     sep(),
     item(t("action.editMenu"), () => openForm(s, s.id), { dialog: true }),
     item(t(s.enabled ? "action.disable" : "action.enable"), () =>
@@ -765,6 +811,7 @@ function changeLanguage(lang: Language) {
 renderLanguages();
 applyI18n();
 
+homeApp = await invoke<string | null>("get_home_app");
 services = await invoke<Service[]>("list_services");
 active = await invoke<string | null>("active_service");
 if (active) recent = [active];
@@ -773,8 +820,17 @@ showBase();
 showStatus(await invoke<BlockerStatus>("blocker_status"));
 
 await listen<BlockerStatus>("blocker-status", (e) => showStatus(e.payload));
+await listen<string | null>("home-app-changed", (e) => {
+  homeApp = e.payload;
+  syncHomePane();
+});
 await listen<Service[]>("services-changed", (e) => {
   services = e.payload;
+  if (homeApp && !services.some((s) => s.id === homeApp && s.enabled)) {
+    document.body.classList.remove("split");
+  } else {
+    syncHomePane();
+  }
   if (active !== null && !services.some((s) => s.id === active)) active = null;
   renderSidebar();
   markCurrent();
