@@ -181,10 +181,14 @@ jobs:
           # el empaquetador no siempre los detecta. Si faltan, la app usa los
           # del sistema con el libnssutil3 empaquetado y Chromium aborta si las
           # versiones no coinciden. Se copian los de este mismo NSS.
-          for lib in libsoftokn3.so libfreeblpriv3.so libfreebl3.so libsqlite3.so.0; do
+          # Lo mismo con OpenGL (libglvnd + Mesa): GTK 4 abre libGLESv2.so.2 y,
+          # si el sistema no la tiene, la app se cierra al arrancar.
+          for lib in libsoftokn3.so libfreeblpriv3.so libfreebl3.so libsqlite3.so.0 \
+                     libGLESv2.so.2 libGL.so.1 libOpenGL.so.0 libGLX_mesa.so.0; do
             [ -e "Pulpo.AppDir/lib/$lib" ] || cp -L "/usr/lib/$lib" Pulpo.AppDir/lib/
           done
-          for lib in libnss3.so libnssutil3.so libsoftokn3.so libfreeblpriv3.so; do
+          for lib in libnss3.so libnssutil3.so libsoftokn3.so libfreeblpriv3.so \
+                     libGLESv2.so.2 libEGL.so.1 libGLX.so.0 libGLX_mesa.so.0; do
             test -e "Pulpo.AppDir/lib/$lib" || { echo "Falta $lib en la AppImage"; exit 1; }
           done
           # El .desktop pide el icono "pulpo" y el AppDir lo trae como Pulpo.png.
