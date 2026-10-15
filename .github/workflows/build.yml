@@ -1,0 +1,240 @@
+name: Build
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  # Permite lanzar el build a mano desde la pestaña Actions.
+  workflow_dispatch:
+
+# Un push nuevo cancela el build anterior de la misma rama, salvo en main:
+# ahí cada push es una release y se deja terminar.
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+env:
+  # Versión de CEF (Chromium) que usa tauri-runtime-cef; la clave de su caché.
+  CEF_VERSION: "152.0.6"
+  # GTK 4.12+ (lo exige muda): Ubuntu 24.04 trae la 4.14, la 22.04 solo 4.6.
+  LINUX_DEPS: libgtk-4-dev librsvg2-dev patchelf cmake ninja-build xvfb
+  # El CLI de Tauri 3 arma la AppImage con quick-sharun (Anylinux-AppImages),
+  # que baja estas piezas de la rama main; en sep/2026 se movieron y las rutas
+  # dan 404. Se fijan al último commit que las tenía.
+  ANYLINUX_BASE: https://raw.githubusercontent.com/pkgforge-dev/Anylinux-AppImages/5e76c43e12c20ccb2f705c6098ca141b2fd368f8/useful-tools
+
+jobs:
+  test:
+    strategy:
+      fail-fast: false
+      matrix:
+        # Windows también: el bloqueo de WebView2 solo compila allí.
+        platform: [ubuntu-24.04, windows-latest]
+    runs-on: ${{ matrix.platform }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Free disk space (Chromium ocupa varios GB)
+        if: runner.os == 'Linux'
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          # En Linux `target/` lleva copias de Chromium: no se cachea.
+          cache-targets: ${{ runner.os != 'Linux' }}
+      - name: Cache CEF
+        if: runner.os == 'Linux'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/tauri-cef
+          key: cef-${{ runner.os }}-${{ env.CEF_VERSION }}
+      - name: Install Tauri Linux deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y $LINUX_DEPS
+      # tauri::generate_context! necesita el frontend compilado en dist/.
+      - name: Placeholder frontend
+        shell: bash
+        run: mkdir -p dist && echo '<!doctype html>' > dist/index.html
+      - name: Format check
+        if: runner.os == 'Linux'
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --all --check
+      - name: Clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --workspace --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --workspace
+
+  # Cada push a main publica una release. La versión es MAJOR.MINOR de
+  # tauri.conf.json + el número de ejecución: 0.1.57, 0.1.58, ...
+  release:
+    needs: test
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+      - id: version
+        run: |
+          base=$(jq -r .version src-tauri/tauri.conf.json | cut -d. -f1,2)
+          echo "version=$base.${{ github.run_number }}" >> "$GITHUB_OUTPUT"
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VERSION: ${{ steps.version.outputs.version }}
+        run: |
+          # Borrador hasta que todos los instaladores estén subidos.
+          gh release create "v$VERSION" --repo "${{ github.repository }}" \
+            --target "$GITHUB_SHA" --title "Pulpo v$VERSION" \
+            --generate-notes --draft
+
+  build-desktop:
+    needs: release
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          # Linux: AppImage. Windows: instalador .exe (NSIS) y .msi.
+          - platform: ubuntu-24.04
+            bundles: appimage
+          - platform: windows-latest
+            bundles: nsis,msi
+    runs-on: ${{ matrix.platform }}
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.release.outputs.version }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Free disk space (Chromium ocupa varios GB)
+        if: runner.os == 'Linux'
+        run: sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /opt/hostedtoolcache/CodeQL
+      # Sin `version`: usa la de "packageManager" en package.json (pnpm 11).
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          cache-targets: ${{ runner.os != 'Linux' }}
+      - name: Cache CEF
+        if: runner.os == 'Linux'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/tauri-cef
+          key: cef-${{ runner.os }}-${{ env.CEF_VERSION }}
+      - name: Install Tauri Linux deps
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y $LINUX_DEPS
+      - run: pnpm install --frozen-lockfile
+      - name: Set release version
+        shell: bash
+        run: |
+          node -e '
+            const fs = require("fs");
+            const p = "src-tauri/tauri.conf.json";
+            const c = JSON.parse(fs.readFileSync(p, "utf8"));
+            c.version = process.env.VERSION;
+            fs.writeFileSync(p, JSON.stringify(c, null, 2));
+          '
+      - name: Build
+        shell: bash
+        run: |
+          export ANYLINUX_LIB_SOURCE=$ANYLINUX_BASE/lib/anylinux.c
+          export GTK_CLASS_FIX_SOURCE=$ANYLINUX_BASE/lib/gtk-class-fix.c
+          export HOOKSRC=$ANYLINUX_BASE/hooks
+          pnpm tauri build --bundles ${{ matrix.bundles }}
+
+      # quick-sharun empaqueta con DwarFS, que AppImageLauncher (y otras
+      # herramientas de integración) no saben abrir: "sqfs_open_image error" y
+      # la AppImage ni se instala ni arranca. Se reempaqueta el mismo AppDir
+      # con el appimagetool clásico (SquashFS), como las AppImages de siempre.
+      - name: Repack AppImage as SquashFS
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd src-tauri/target/release/bundle/appimage
+          img=$(ls *.AppImage)
+          # El .desktop pide el icono "pulpo" y el AppDir lo trae como Pulpo.png.
+          cp Pulpo.AppDir/Pulpo.png Pulpo.AppDir/pulpo.png
+          wget -q -O appimagetool \
+            https://github.com/AppImage/appimagetool/releases/download/continuous/appimagetool-x86_64.AppImage
+          chmod +x appimagetool
+          rm "$img"
+          ARCH=x86_64 ./appimagetool --appimage-extract-and-run --no-appstream Pulpo.AppDir "$img"
+          rm appimagetool
+          # Tiene que ser SquashFS ("hsqs") justo después del runtime.
+          python3 - "$img" <<'PY'
+          import struct, sys
+          f = open(sys.argv[1], "rb")
+          h = f.read(64)
+          shoff = struct.unpack("<Q", h[0x28:0x30])[0]
+          shentsize, shnum = struct.unpack("<HH", h[0x3A:0x3E])
+          f.seek(shoff + shentsize * shnum)
+          magic = f.read(4)
+          print("filesystem:", magic)
+          sys.exit(0 if magic == b"hsqs" else 1)
+          PY
+
+      # Lo que falló en zanahoria no fue compilar sino abrir la release: aquí
+      # se arranca la AppImage tal cual se publica y se comprueba que sigue
+      # viva unos segundos (sin pantalla real, con Xvfb).
+      - name: Smoke test AppImage
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          set -euo pipefail
+          img=$(ls src-tauri/target/release/bundle/appimage/*.AppImage)
+          ls -lh "$img"
+          chmod +x "$img"
+          export HOME_TEST=$(mktemp -d)
+          # Sin FUSE en el runner: el runtime extrae y ejecuta.
+          APPIMAGE_EXTRACT_AND_RUN=1 \
+          XDG_DATA_HOME=$HOME_TEST/data XDG_CACHE_HOME=$HOME_TEST/cache XDG_CONFIG_HOME=$HOME_TEST/config \
+            xvfb-run -a "$img" > smoke.log 2>&1 &
+          pid=$!
+          sleep 25
+          if ! kill -0 "$pid" 2>/dev/null; then
+            echo "La AppImage se cerró al arrancar:"; cat smoke.log; exit 1
+          fi
+          # Chromium crea su carpeta de perfiles al arrancar.
+          test -d "$HOME_TEST/data/com.pulpo.app/cef" \
+            || { echo "No llegó a iniciar Chromium:"; cat smoke.log; exit 1; }
+          echo "Arrancó bien:"; tail -n 20 smoke.log
+          kill "$pid" || true
+
+      - name: Upload to release
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          files=(src-tauri/target/release/bundle/appimage/*.AppImage
+                 src-tauri/target/release/bundle/nsis/*.exe
+                 src-tauri/target/release/bundle/msi/*.msi)
+          test ${#files[@]} -gt 0
+          gh release upload "v$VERSION" "${files[@]}" --clobber --repo "${{ github.repository }}"
+
+  # Publica la release solo si los dos builds terminaron bien.
+  publish:
+    needs: [release, build-desktop]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh release edit "v${{ needs.release.outputs.version }}" \
+            --repo "${{ github.repository }}" --draft=false --latest

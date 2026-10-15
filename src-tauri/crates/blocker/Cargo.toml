@@ -1,0 +1,17 @@
+[package]
+name = "blocker"
+version = "0.1.0"
+edition = "2021"
+description = "Bloqueador de anuncios de Pulpo sobre adblock-rust (el motor de Brave)"
+
+[features]
+# Exporta las reglas de red al formato content-blocker de WebKit (Linux).
+content-blocking = ["adblock/content-blocking"]
+
+[dependencies]
+# Sin `single-thread`: el Engine se construye en un hilo y se usa en otro.
+adblock = { version = "0.13", default-features = false, features = ["embedded-domain-resolver", "full-regex-handling"] }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+ureq = "3"

@@ -1,0 +1,50 @@
+[package]
+name = "pulpo"
+version = "0.1.0"
+description = "Pulpo — tus apps web en una ventana, sin anuncios"
+authors = ["eitalouarruda"]
+edition = "2021"
+
+[workspace]
+members = ["crates/blocker"]
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[lib]
+name = "pulpo_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "=3.0.0-alpha.3", features = [] }
+
+[dependencies]
+# `unstable`: varios webviews dentro de una ventana (Window::add_child).
+# Tauri 3 (alpha) porque es el que trae el runtime CEF (Chromium) para Linux.
+tauri = { version = "=3.0.0-alpha.4", features = ["unstable"] }
+tauri-plugin-opener = "=3.0.0-alpha.2"
+serde.workspace = true
+serde_json.workspace = true
+# Descarga de iconos de los servicios.
+ureq = "3"
+base64 = "0.22"
+
+# Linux: Chromium (CEF). WebKitGTK es ~3 veces más lento navegando YouTube Music.
+[target.'cfg(target_os = "linux")'.dependencies]
+blocker = { path = "crates/blocker" }
+tauri-runtime-cef = { version = "=3.0.0-alpha.5", features = ["unstable"] }
+
+# Windows: WebView2, que ya es Chromium y viene con el sistema.
+[target.'cfg(windows)'.dependencies]
+blocker = { path = "crates/blocker" }
+tauri-runtime-wry = { version = "=3.0.0-alpha.4", features = ["unstable"] }
+webview2-com = "0.39"
+windows = { version = "0.62", features = ["Win32_System_Com"] }
+windows-core = "0.62"
+
+[profile.release]
+lto = true
+codegen-units = 1
+strip = true
