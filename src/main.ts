@@ -42,6 +42,7 @@ const views = {
   manage: $("#manage-view"),
   form: $<HTMLFormElement>("#form-view"),
   confirm: $("#confirm-view"),
+  switcher: $("#switcher-view"),
 };
 const form = {
   title: $("#form-title"),
@@ -775,6 +776,119 @@ $("#sidebar").addEventListener("mousedown", () => {
   if (currentView() === "menu" && !overlay.hidden) closeOverlay();
 });
 
+// ---------------------------------------------------------------- selector de apps
+
+const switcher = {
+  search: $<HTMLInputElement>("#switcher-search"),
+  list: $("#switcher-list"),
+  empty: $("#switcher-empty"),
+};
+let switcherItems: Service[] = [];
+let switcherIndex = 0;
+
+/// Sin tildes ni mayúsculas: "camara" encuentra "Cámara".
+const fold = (text: string) => text.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase();
+
+/// Ctrl+Espacio: las apps activadas, filtradas por nombre. Primero las usadas
+/// más recientemente; las que empiezan por lo escrito, antes que el resto.
+function openSwitcher() {
+  const view = overlay.hidden ? null : currentView();
+  if (view === "switcher") return moveSwitcher(1);
+  if (view !== null && !isBase(view)) return;
+  switcher.search.value = "";
+  renderSwitcher();
+  openOverlay("switcher");
+  switcher.search.focus();
+}
+
+function renderSwitcher() {
+  const q = fold(switcher.search.value.trim());
+  const enabled = services.filter((s) => s.enabled);
+  const byRecent = [
+    ...recent.flatMap((id) => enabled.filter((s) => s.id === id)),
+    ...enabled.filter((s) => !recent.includes(s.id)),
+  ];
+  const matches = byRecent.filter((s) => fold(s.name).includes(q));
+  switcherItems = [
+    ...matches.filter((s) => fold(s.name).startsWith(q)),
+    ...matches.filter((s) => !fold(s.name).startsWith(q)),
+  ];
+  // Sin filtro, la primera es la app que ya se ve: se propone la anterior.
+  switcherIndex = !q && switcherItems[0]?.id === active && switcherItems.length > 1 ? 1 : 0;
+  switcher.empty.hidden = switcherItems.length > 0;
+  switcher.list.replaceChildren(
+    ...switcherItems.map((s, i) => {
+      const li = document.createElement("li");
+      li.role = "option";
+      const icon = document.createElement("span");
+      icon.className = "m-icon";
+      if (s.icon) {
+        const img = document.createElement("img");
+        img.src = s.icon;
+        img.alt = "";
+        icon.append(img);
+      } else {
+        icon.style.background = s.color;
+        icon.textContent = s.name.trim()[0]?.toUpperCase() ?? "?";
+      }
+      const text = document.createElement("span");
+      text.className = "m-text";
+      const name = document.createElement("strong");
+      name.textContent = s.name;
+      text.append(name);
+      if (s.group) {
+        const group = document.createElement("small");
+        group.textContent = s.group;
+        text.append(group);
+      }
+      const badge = document.createElement("span");
+      badge.className = "switcher-badge";
+      const count = badges.get(s.id) ?? 0;
+      badge.textContent = count > 0 ? String(count) : "";
+      li.append(icon, text, badge);
+      li.addEventListener("click", () => goToSwitcherItem(i));
+      li.addEventListener("mousemove", () => {
+        if (switcherIndex !== i) moveSwitcher(i - switcherIndex);
+      });
+      return li;
+    }),
+  );
+  markSwitcher();
+}
+
+function markSwitcher() {
+  for (const [i, li] of [...switcher.list.children].entries()) {
+    li.setAttribute("aria-selected", String(i === switcherIndex));
+    if (i === switcherIndex) li.scrollIntoView({ block: "nearest" });
+  }
+}
+
+function moveSwitcher(step: number) {
+  const n = switcherItems.length;
+  if (n === 0) return;
+  switcherIndex = (((switcherIndex + step) % n) + n) % n;
+  markSwitcher();
+}
+
+function goToSwitcherItem(i: number) {
+  const s = switcherItems[i];
+  if (!s) return;
+  returnTo = null;
+  closeOverlay();
+  select(s.id);
+}
+
+switcher.search.addEventListener("input", renderSwitcher);
+switcher.search.addEventListener("keydown", (e) => {
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    moveSwitcher(e.key === "ArrowDown" ? 1 : -1);
+  } else if (e.key === "Enter") {
+    e.preventDefault();
+    goToSwitcherItem(switcherIndex);
+  }
+});
+
 // ---------------------------------------------------------------- arranque
 
 // ---------------------------------------------------------------- idioma
@@ -835,6 +949,7 @@ await listen<Service[]>("services-changed", (e) => {
   renderSidebar();
   markCurrent();
   if (currentView() === "manage" && !overlay.hidden) renderManage();
+  else if (currentView() === "switcher" && !overlay.hidden) renderSwitcher();
   else showBase();
 });
 await listen<{ id: string; count: number }>("badge", ({ payload }) => {
@@ -847,13 +962,25 @@ await listen<{ id: string; count: number }>("badge", ({ payload }) => {
   if (!overlay.hidden && currentView() === "home") renderHome();
 });
 // Atajos pulsados dentro de una app (los detecta su script de inicio).
-type Shortcut = { kind: "home" } | { kind: "previous" } | { kind: "index"; n: number };
+type Shortcut =
+  | { kind: "home" }
+  | { kind: "previous" }
+  | { kind: "index"; n: number }
+  | { kind: "switcher" };
 await listen<Shortcut>("shortcut", ({ payload }) => {
+  if (payload.kind === "switcher") return openSwitcher();
   returnTo = null;
   if (!overlay.hidden && !isBase(currentView())) closeOverlay();
   if (payload.kind === "home") goHome();
   else if (payload.kind === "previous") selectPrevious();
   else selectIndex(payload.n);
+});
+// Clic en una notificación de una app: Pulpo ya está al frente, falta abrirla.
+await listen<string>("notification-clicked", ({ payload: id }) => {
+  if (!services.some((s) => s.id === id)) return;
+  returnTo = null;
+  if (!overlay.hidden && !isBase(currentView())) closeOverlay();
+  select(id);
 });
 await listen<string>("edit-service", ({ payload: id }) => {
   const s = services.find((s) => s.id === id);
@@ -875,6 +1002,13 @@ window.addEventListener("keydown", (e) => {
       return goHome();
     }
     if (!isBase(currentView())) closeOverlay();
+    return;
+  }
+  // Ctrl+Espacio con el foco en la barra lateral (dentro de una app lo hace
+  // su script de inicio).
+  if (e.code === "Space" && e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) {
+    e.preventDefault();
+    if (!e.repeat) openSwitcher();
     return;
   }
   // Ctrl+1..9 con el foco en la barra lateral (dentro de una app lo hace su

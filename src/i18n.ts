@@ -21,6 +21,8 @@ const en = {
   "catalog.title": "Add app",
   "catalog.search": "Search…",
   "catalog.custom": "Custom",
+  "switcher.search": "Go to app…",
+  "switcher.empty": "No app matches",
 
   "disabled.title": "{name} is disabled",
   "disabled.body": "It is closed: it doesn't load or get notifications until you enable it.",
@@ -107,6 +109,8 @@ const es: Dictionary = {
   "catalog.title": "Agregar app",
   "catalog.search": "Buscar…",
   "catalog.custom": "Personalizada",
+  "switcher.search": "Ir a la app…",
+  "switcher.empty": "Ninguna app coincide",
 
   "disabled.title": "{name} está desactivada",
   "disabled.body": "Está cerrada: no carga ni recibe notificaciones hasta que la actives.",
@@ -190,6 +194,8 @@ const pt: Dictionary = {
   "catalog.title": "Adicionar app",
   "catalog.search": "Buscar…",
   "catalog.custom": "Personalizado",
+  "switcher.search": "Ir para o app…",
+  "switcher.empty": "Nenhum app corresponde",
 
   "disabled.title": "{name} está desativado",
   "disabled.body": "Está fechado: não carrega nem recebe notificações até você ativá-lo.",

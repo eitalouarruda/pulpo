@@ -48,6 +48,8 @@ session, and ads are blocked with the same engine and filter lists as Brave.
   cache). Google, Apple, Microsoft or GitHub sign-in pop-ups open inside Pulpo
   so logins complete in the right app.
 - **Rambox-style shortcuts** that also work while you're typing inside an app.
+- **Notifications take you there.** Clicking an app's notification brings
+  Pulpo to the front with that app open.
 - **Right size on every screen.** On Linux with Hyprland's
   `xwayland:force_zero_scaling` (Omarchy), Pulpo applies each screen's scale
   itself and switches it when you move the window between screens.
@@ -84,6 +86,7 @@ They work from the sidebar and also with the focus inside an app.
 | --- | --- |
 | <kbd>Ctrl</kbd> <kbd>Ctrl</kbd> (tap twice) | Switch between the last two apps |
 | <kbd>Ctrl</kbd>+<kbd>1</kbd> … <kbd>Ctrl</kbd>+<kbd>9</kbd> | Go to the app at that position in the sidebar |
+| <kbd>Ctrl</kbd>+<kbd>Space</kbd> | Quick switcher: type to filter your apps, <kbd>Enter</kbd> to open one |
 | <kbd>Esc</kbd> <kbd>Esc</kbd> <kbd>Esc</kbd> | Home page |
 | <kbd>Ctrl</kbd>+<kbd>+</kbd> / <kbd>Ctrl</kbd>+<kbd>-</kbd> / <kbd>Ctrl</kbd>+<kbd>0</kbd> | Bigger / smaller / automatic size on this screen (sidebar focused) |
 | Middle click on an icon | Reload the app |

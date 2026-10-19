@@ -820,7 +820,8 @@ fn open_service(
                     // Este aviso llega en el hilo de UI del motor web, y `layout` espera
                     // a ese mismo hilo: desde aquí se bloquearía.
                     let app = webview.app_handle().clone();
-                    std::thread::spawn(move || on_shortcut(&app, shortcut));
+                    let id = id.clone();
+                    std::thread::spawn(move || on_shortcut(&app, shortcut, &id));
                     return;
                 }
                 let count = services::badge_from_title(&title).unwrap_or(0);
@@ -900,13 +901,39 @@ fn open_service(
     Ok(())
 }
 
-/// Atajo pulsado dentro de una app. La barra lateral decide a cuál ir (conoce
-/// el orden y el historial); la página inicial se muestra ya desde aquí.
-fn on_shortcut(app: &AppHandle, shortcut: shortcuts::Shortcut) {
-    if shortcut == shortcuts::Shortcut::Home {
-        show_home(app.clone());
+/// Atajo pulsado dentro de la app `id`. La barra lateral decide a cuál ir
+/// (conoce el orden y el historial); la página inicial se muestra ya desde aquí.
+fn on_shortcut(app: &AppHandle, shortcut: shortcuts::Shortcut, id: &str) {
+    match shortcut {
+        shortcuts::Shortcut::Home => show_home(app.clone()),
+        // El selector se escribe en la barra lateral: el teclado pasa a ella.
+        shortcuts::Shortcut::Switcher => {
+            if let Some(shell) = app.get_webview("shell") {
+                let _ = shell.set_focus();
+            }
+        }
+        // Clic en una notificación: Pulpo al frente, en la app que la mostró.
+        shortcuts::Shortcut::Notification => {
+            raise_window(app);
+            let _ = app.emit_to("shell", "notification-clicked", id);
+            return;
+        }
+        shortcuts::Shortcut::Previous | shortcuts::Shortcut::Index { .. } => {}
     }
     let _ = app.emit_to("shell", "shortcut", shortcut);
+}
+
+/// Trae la ventana al frente aunque esté minimizada o en otro escritorio.
+fn raise_window(app: &AppHandle) {
+    let Some(window) = app.get_window("main") else {
+        return;
+    };
+    let _ = window.unminimize();
+    let _ = window.show();
+    let _ = window.set_focus();
+    // Hyprland no deja que una app X11 se dé el foco a sí misma: se le pide a él.
+    #[cfg(target_os = "linux")]
+    display::focus_own_window();
 }
 
 fn is_visible(app: &AppHandle, id: &str) -> bool {
@@ -933,6 +960,12 @@ fn layout(app: &AppHandle) {
         let _ = shell.set_size(LogicalSize::new(width, size.height));
     }
     let content = LogicalSize::new((size.width - sidebar).max(1.0), size.height);
+    // Las apps ocultas se apartan fuera de la ventana (con su tamaño, para que
+    // no se re-maqueten al volver). En Linux Chromium busca el destino de un
+    // arrastre entre sus ventanas por posición, sin saber que Pulpo ocultó
+    // unas: si queda una oculta debajo del cursor, el arrastre (soltar tarjetas
+    // en Jira, etc.) se le entrega a ella y la app visible no lo recibe.
+    let offscreen = -(size.width + 100.0);
     let ids: Vec<String> = state
         .services
         .lock()
@@ -944,19 +977,19 @@ fn layout(app: &AppHandle) {
         let Some(webview) = app.get_webview(&id) else {
             continue;
         };
-        let _ = webview.set_position(LogicalPosition::new(sidebar, 0.0));
         let _ = webview.set_size(content);
-        let _ = if is_visible(app, &id) {
-            webview.show()
+        if is_visible(app, &id) {
+            let _ = webview.set_position(LogicalPosition::new(sidebar, 0.0));
+            let _ = webview.show();
         } else {
-            webview.hide()
-        };
+            let _ = webview.hide();
+            let _ = webview.set_position(LogicalPosition::new(offscreen, 0.0));
+        }
     }
     // Panel de la página inicial: la mitad de abajo, a la derecha de la barra
     // lateral. La barra (estirada a toda la ventana) pinta la de arriba.
     if let Some(pane) = app.get_webview(HOME_PANE) {
         let top = (size.height / 2.0).round();
-        let _ = pane.set_position(LogicalPosition::new(sidebar, top));
         let _ = pane.set_size(LogicalSize::new(
             (size.width - sidebar).max(1.0),
             (size.height - top).max(1.0),
@@ -964,6 +997,12 @@ fn layout(app: &AppHandle) {
         let home = overlay
             && state.home_pane_visible.load(Ordering::SeqCst)
             && state.active.lock().unwrap().is_none();
-        let _ = if home { pane.show() } else { pane.hide() };
+        if home {
+            let _ = pane.set_position(LogicalPosition::new(sidebar, top));
+            let _ = pane.show();
+        } else {
+            let _ = pane.hide();
+            let _ = pane.set_position(LogicalPosition::new(offscreen, top));
+        }
     }
 }

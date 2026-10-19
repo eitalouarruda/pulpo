@@ -69,6 +69,13 @@ pub fn auto_zoom(monitor: &str) -> f64 {
     1.0
 }
 
+/// Pide al compositor el foco para la ventana de Pulpo (y que cambie al
+/// escritorio donde está). Solo hace algo con Hyprland.
+#[cfg(target_os = "linux")]
+pub fn focus_own_window() {
+    hyprland::focus_window(std::process::id());
+}
+
 #[cfg(target_os = "linux")]
 mod hyprland {
     //! Consulta a Hyprland por su socket de control (lo mismo que `hyprctl`).
@@ -89,6 +96,11 @@ mod hyprland {
         let mut reply = Vec::new();
         stream.read_to_end(&mut reply).ok()?;
         Some(reply)
+    }
+
+    /// `dispatch focuswindow`: enfoca la ventana del proceso `pid`.
+    pub fn focus_window(pid: u32) {
+        let _ = request(&format!("dispatch focuswindow pid:{pid}"));
     }
 
     #[derive(Deserialize)]
