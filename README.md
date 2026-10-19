@@ -149,6 +149,11 @@ benchmarks navigating YouTube Music it was about 3× slower than Chromium, so
 Pulpo uses Tauri 3's CEF runtime on Linux. On Windows WebView2 is already
 Chromium.
 
+The official CEF builds don't play H.264/AAC (MP4 videos, Discord's GIFs), so
+the AppImage ships the same CEF version with proprietary codecs, taken from
+Arch's [`cef-vaapi`](https://github.com/bnema/cef-vaapi) package by
+`scripts/cef-codecs.sh`. Local development builds use the official CEF.
+
 On Linux Pulpo runs through XWayland. With Hyprland and
 `xwayland:force_zero_scaling = true`, X11 apps aren't scaled, so Pulpo asks
 Hyprland for the scale of the screen the window is on and applies it as zoom

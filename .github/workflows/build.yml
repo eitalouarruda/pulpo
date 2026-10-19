@@ -17,6 +17,11 @@ concurrency:
 env:
   # Versión de CEF (Chromium) que usa tauri-runtime-cef; la clave de su caché.
   CEF_VERSION: "152.0.6"
+  # La AppImage usa ese mismo CEF pero con códecs propietarios (H.264, AAC: los
+  # GIF de Discord son MP4, videos, audios), armado con scripts/cef-codecs.sh
+  # y subido a la release cef-<versión>-codecs. Al cambiar CEF_VERSION hay que
+  # correr `scripts/cef-codecs.sh <versión> --upload` y poner aquí el sha256.
+  CEF_CODECS_SHA256: "74a0a90bf5072f67cc2ebb28f27011ce305e0842017034c511a0f4687723a394"
   # El CLI de Tauri 3 arma la AppImage con quick-sharun (Anylinux-AppImages),
   # que baja estas piezas de la rama main; en sep/2026 se movieron y las rutas
   # dan 404. Se fijan al último commit que las tenía.
@@ -120,18 +125,42 @@ jobs:
             git base-devel rust nodejs npm gtk4 librsvg patchelf cmake ninja \
             xorg-server-xvfb xorg-xauth dbus mesa nss strace wget python file \
             alsa-lib libcups at-spi2-core nspr libdrm libglvnd vulkan-icd-loader \
-            libxkbcommon libxcomposite libxdamage libxrandr libxcursor libxinerama libxi
+            libxkbcommon libxcomposite libxdamage libxrandr libxcursor libxinerama libxi \
+            openh264 brotli libxml2 libjpeg-turbo opus dav1d libwebp freetype2 harfbuzz \
+            flac minizip libxslt libpulse libva
           npm install -g pnpm@11.6.0
           # Chromium no arranca como root, y el empaquetador lo ejecuta para
           # descubrir qué librerías carga: el build va con un usuario normal.
           useradd -m builder
           mkdir -p "$CEF_PATH"
       - uses: actions/checkout@v5
+      # cef-dll-sys valida la carpeta solo por su archive.json y, si no le
+      # sirve, baja el CEF oficial (sin códecs) sin avisar: se comprueba aquí
+      # que Cargo.lock pide la versión que hay en la release.
+      - name: Check CEF version
+        run: |
+          locked=$(grep -A1 '^name = "cef-dll-sys"$' src-tauri/Cargo.lock | sed -n 's/^version = ".*+\(.*\)"$/\1/p')
+          if [ "$locked" != "$CEF_VERSION" ]; then
+            echo "Cargo.lock usa CEF $locked y CEF_VERSION es $CEF_VERSION."
+            echo "Corre 'scripts/cef-codecs.sh $locked --upload' y actualiza CEF_VERSION y CEF_CODECS_SHA256."
+            exit 1
+          fi
       - name: Cache CEF
+        id: cef-cache
         uses: actions/cache@v4
         with:
           path: /opt/tauri-cef
-          key: cef-arch-${{ env.CEF_VERSION }}
+          key: cef-arch-${{ env.CEF_VERSION }}-codecs-${{ env.CEF_CODECS_SHA256 }}
+      - name: Download CEF with codecs
+        if: steps.cef-cache.outputs.cache-hit != 'true'
+        run: |
+          file="cef-$CEF_VERSION-codecs-linux-x86_64.tar.zst"
+          wget -q -O "/tmp/$file" \
+            "https://github.com/${{ github.repository }}/releases/download/cef-$CEF_VERSION-codecs/$file" ||
+            { echo "Falta $file: corre 'scripts/cef-codecs.sh $CEF_VERSION --upload'."; exit 1; }
+          echo "$CEF_CODECS_SHA256  /tmp/$file" | sha256sum -c
+          tar --zstd -xf "/tmp/$file" -C "$CEF_PATH" --strip-components 1
+          rm "/tmp/$file"
       - name: Build AppImage
         run: |
           chown -R builder "$GITHUB_WORKSPACE" "$CEF_PATH"
@@ -156,6 +185,11 @@ jobs:
               pnpm install --frozen-lockfile
               pnpm tauri build --bundles appimage
             '
+
+      # Que no se haya colado el CEF oficial: la libcef.so empaquetada tiene que
+      # ser la de la carpeta con códecs.
+      - name: Check CEF has codecs
+        run: cmp src-tauri/target/release/libcef.so "$CEF_PATH/libcef.so"
 
       # Si el empaquetador dice "missing libraries", aquí se ve cuáles.
       - name: Show missing libraries
