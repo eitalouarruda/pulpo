@@ -17,6 +17,12 @@ use serde::{Deserialize, Serialize};
 pub const MIN_ZOOM: f64 = 0.5;
 pub const MAX_ZOOM: f64 = 3.0;
 
+/// Parte de la altura de la ventana que ocupa la app de la página inicial.
+pub const DEFAULT_HOME_PANE: f64 = 0.5;
+const MIN_HOME_PANE: f64 = 0.15;
+/// Arriba queda sitio para una fila de iconos.
+const MAX_HOME_PANE: f64 = 0.92;
+
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Settings {
     /// Zoom elegido por el usuario, por nombre de pantalla (`eDP-1`, …).
@@ -25,6 +31,23 @@ pub struct Settings {
     /// App que se ve en la mitad inferior de la página inicial.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub home_app: Option<String>,
+    /// Altura de esa app, como parte de la ventana (sin valor: la mitad).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub home_pane: Option<f64>,
+}
+
+impl Settings {
+    pub fn home_pane(&self) -> f64 {
+        self.home_pane.map_or(DEFAULT_HOME_PANE, clamp_home_pane)
+    }
+}
+
+pub fn clamp_home_pane(size: f64) -> f64 {
+    if size.is_finite() {
+        size.clamp(MIN_HOME_PANE, MAX_HOME_PANE)
+    } else {
+        DEFAULT_HOME_PANE
+    }
 }
 
 pub fn settings_path(data_dir: &Path) -> PathBuf {
@@ -98,9 +121,16 @@ mod hyprland {
         Some(reply)
     }
 
-    /// `dispatch focuswindow`: enfoca la ventana del proceso `pid`.
+    /// Enfoca la ventana del proceso `pid`. Con la configuración en Lua
+    /// (Hyprland 0.55+) `dispatch` espera la sintaxis de `hl.dsp` y rechaza la
+    /// clásica: se prueba la clásica y, si no responde `ok`, la de Lua.
     pub fn focus_window(pid: u32) {
-        let _ = request(&format!("dispatch focuswindow pid:{pid}"));
+        let ok = |reply: Option<Vec<u8>>| reply.is_some_and(|r| r.trim_ascii() == b"ok");
+        if !ok(request(&format!("dispatch focuswindow pid:{pid}"))) {
+            let _ = request(&format!(
+                r#"dispatch hl.dsp.focus({{ window = "pid:{pid}" }})"#
+            ));
+        }
     }
 
     #[derive(Deserialize)]
@@ -152,6 +182,15 @@ mod tests {
         assert_eq!(clamp(1.0 + 0.1 + 0.1 + 0.1), 1.3);
         assert_eq!(clamp(0.1), MIN_ZOOM);
         assert_eq!(clamp(9.0), MAX_ZOOM);
+    }
+
+    #[test]
+    fn clamps_home_pane() {
+        assert_eq!(Settings::default().home_pane(), DEFAULT_HOME_PANE);
+        assert_eq!(clamp_home_pane(0.05), MIN_HOME_PANE);
+        assert_eq!(clamp_home_pane(0.95), MAX_HOME_PANE);
+        assert_eq!(clamp_home_pane(f64::NAN), DEFAULT_HOME_PANE);
+        assert_eq!(clamp_home_pane(0.4), 0.4);
     }
 
     #[test]

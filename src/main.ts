@@ -43,6 +43,7 @@ const views = {
   form: $<HTMLFormElement>("#form-view"),
   confirm: $("#confirm-view"),
   switcher: $("#switcher-view"),
+  update: $("#update-view"),
 };
 const form = {
   title: $("#form-title"),
@@ -384,6 +385,8 @@ function hideOverlay() {
 /// base, o deja ver la app.
 function closeOverlay() {
   if (overlay.hidden) return;
+  // Descargando la actualización: al terminar Pulpo se reinicia solo.
+  if (updating && currentView() === "update") return;
   const current = currentView();
   editing = removing = null;
   if (returnTo && returnTo !== current) {
@@ -432,12 +435,14 @@ function renderHomeAppChoice() {
 function setHomeApp(id: string | null) {
   homeApp = id;
   renderHomeAppChoice();
+  renderPaneChoice();
   syncHomePane();
   invoke("set_home_app", { id }).catch(console.error);
 }
 
 function renderManage() {
   renderHomeAppChoice();
+  renderPaneChoice();
   const list = $("#manage-list");
   list.replaceChildren(
     ...services.map((s) => {
@@ -776,6 +781,90 @@ $("#sidebar").addEventListener("mousedown", () => {
   if (currentView() === "menu" && !overlay.hidden) closeOverlay();
 });
 
+// ---------------------------------------------------------------- tamaño de la app de la página inicial
+
+/// Parte de la altura que ocupa la app de abajo (como en Rust: 0,15 a 0,92).
+let paneSize = 0.5;
+const clampPane = (size: number) => Math.min(0.92, Math.max(0.15, size));
+const PANE_PRESETS = [
+  ["manage.homePaneSmall", 1 / 3],
+  ["manage.homePaneHalf", 1 / 2],
+  ["manage.homePaneLarge", 2 / 3],
+] as const;
+
+/// Por debajo de esta altura (px CSS) la página inicial deja solo los iconos.
+const TIGHT_HOME = 130;
+
+function applyPaneSize(size: number) {
+  paneSize = size;
+  document.body.style.setProperty("--pane", String(size));
+  document.body.classList.toggle("pane-tight", window.innerHeight * (1 - size) < TIGHT_HOME);
+}
+window.addEventListener("resize", () => applyPaneSize(paneSize));
+
+/// Mueve el divisor y recoloca la app; `save` lo guarda en los ajustes.
+function setPaneSize(size: number, save: boolean) {
+  applyPaneSize(clampPane(size));
+  return invoke<number>("set_home_pane_size", { size: paneSize, save })
+    .then(applyPaneSize)
+    .catch(console.error);
+}
+
+function renderPaneChoice() {
+  const row = $("#home-pane-row");
+  row.hidden = homeApp === null;
+  $("#home-pane-size").replaceChildren(
+    ...PANE_PRESETS.map(([label, size]) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.role = "radio";
+      b.className = "ghost-btn";
+      b.textContent = t(label);
+      b.setAttribute("aria-checked", String(Math.abs(paneSize - size) < 0.01));
+      b.addEventListener("click", () => setPaneSize(size, true).then(renderPaneChoice));
+      return b;
+    }),
+  );
+}
+
+// Arrastrar el divisor. Con el botón pulsado los movimientos siguen llegando
+// aquí aunque el puntero pase por encima de la app (captura del puntero).
+const paneHandle = $("#pane-handle");
+let paneDrag: { pending: number | null } | null = null;
+paneHandle.addEventListener("pointerdown", (e) => {
+  if (e.button !== 0) return;
+  e.preventDefault();
+  paneHandle.setPointerCapture(e.pointerId);
+  paneHandle.classList.add("dragging");
+  document.body.classList.add("resizing-pane");
+  paneDrag = { pending: null };
+});
+paneHandle.addEventListener("pointermove", (e) => {
+  if (!paneDrag) return;
+  const first = paneDrag.pending === null;
+  paneDrag.pending = clampPane(1 - e.clientY / window.innerHeight);
+  applyPaneSize(paneDrag.pending);
+  // Una recolocación de la app por cuadro como mucho.
+  if (first) {
+    requestAnimationFrame(() => {
+      if (paneDrag?.pending == null) return;
+      const size = paneDrag.pending;
+      paneDrag.pending = null;
+      setPaneSize(size, false);
+    });
+  }
+});
+const endPaneDrag = () => {
+  if (!paneDrag) return;
+  paneDrag = null;
+  paneHandle.classList.remove("dragging");
+  document.body.classList.remove("resizing-pane");
+  setPaneSize(paneSize, true);
+};
+paneHandle.addEventListener("pointerup", endPaneDrag);
+paneHandle.addEventListener("pointercancel", endPaneDrag);
+paneHandle.addEventListener("dblclick", () => setPaneSize(0.5, true));
+
 // ---------------------------------------------------------------- selector de apps
 
 const switcher = {
@@ -889,6 +978,57 @@ switcher.search.addEventListener("keydown", (e) => {
   }
 });
 
+// ---------------------------------------------------------------- actualizaciones
+
+const updateUi = {
+  title: $("#update-title"),
+  body: $("#update-body"),
+  progress: $<HTMLProgressElement>("#update-progress"),
+  error: $("#update-error"),
+  later: $<HTMLButtonElement>("#update-later"),
+  install: $<HTMLButtonElement>("#update-install"),
+};
+
+/// Pregunta por la versión nueva, sin tapar un diálogo que esté abierto.
+function offerUpdate(version: string) {
+  const view = overlay.hidden ? null : currentView();
+  if (view !== null && !isBase(view)) return;
+  updateUi.title.textContent = t("update.title", { version });
+  updateUi.body.textContent = t("update.body");
+  updateUi.progress.hidden = true;
+  updateUi.error.textContent = "";
+  updateUi.later.disabled = updateUi.install.disabled = false;
+  openOverlay("update");
+}
+
+/// Hay una actualización descargándose.
+let updating = false;
+
+updateUi.install.addEventListener("click", async () => {
+  updating = true;
+  updateUi.later.disabled = updateUi.install.disabled = true;
+  updateUi.error.textContent = "";
+  updateUi.progress.hidden = false;
+  updateUi.progress.removeAttribute("value");
+  try {
+    // Si sale bien, Pulpo se cierra y arranca la versión nueva.
+    await invoke("install_update");
+    updateUi.body.textContent = t("update.restarting");
+  } catch (err) {
+    updating = false;
+    updateUi.progress.hidden = true;
+    updateUi.error.textContent = tError(err);
+    updateUi.later.disabled = updateUi.install.disabled = false;
+  }
+});
+
+await listen<{ downloaded: number; total: number }>("update-progress", ({ payload }) => {
+  const done = payload.total > 0 ? payload.downloaded / payload.total : 0;
+  updateUi.progress.value = done;
+  updateUi.body.textContent =
+    done >= 1 ? t("update.restarting") : t("update.downloading", { percent: Math.floor(done * 100) });
+});
+
 // ---------------------------------------------------------------- arranque
 
 // ---------------------------------------------------------------- idioma
@@ -926,6 +1066,7 @@ renderLanguages();
 applyI18n();
 
 homeApp = await invoke<string | null>("get_home_app");
+applyPaneSize(await invoke<number>("get_home_pane_size"));
 services = await invoke<Service[]>("list_services");
 active = await invoke<string | null>("active_service");
 if (active) recent = [active];
@@ -1071,3 +1212,8 @@ window.addEventListener("keydown", (e) => {
 });
 showZoom(await invoke<ZoomInfo>("get_zoom"));
 await listen<ZoomInfo>("zoom-changed", (e) => showZoom(e.payload));
+
+// Al final del arranque, sin esperar: GitHub puede tardar o no responder.
+invoke<{ version: string } | null>("check_update")
+  .then((found) => found && offerUpdate(found.version))
+  .catch(console.error);

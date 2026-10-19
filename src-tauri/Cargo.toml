@@ -35,6 +35,8 @@ base64 = "0.22"
 [target.'cfg(target_os = "linux")'.dependencies]
 blocker = { path = "crates/blocker" }
 tauri-runtime-cef = { version = "=3.0.0-alpha.5", features = ["unstable"] }
+# Seguir el puntero durante un arrastre (ver `platform/linux_drag.rs`).
+x11-dl = "2.21"
 
 # Windows: WebView2, que ya es Chromium y viene con el sistema.
 [target.'cfg(windows)'.dependencies]

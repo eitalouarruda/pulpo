@@ -13,7 +13,7 @@ use tauri_runtime_cef::{allocate_devtools_message_id, DevToolsProtocol, WebviewC
 
 /// El `Browser` de CEF solo se toca en el hilo de UI de CEF, que es donde
 /// corren tanto `with_cef_webview` como los observadores del DevTools Protocol.
-struct UiThread(cef::Browser);
+pub(super) struct UiThread(pub(super) cef::Browser);
 unsafe impl Send for UiThread {}
 
 /// Lo que hace falta de un `Fetch.requestPaused`.
@@ -75,6 +75,9 @@ pub fn attach(
 ) -> tauri::Result<()> {
     if initial_load.recv_timeout(Duration::from_secs(10)).is_err() {
         eprintln!("[pulpo] {url}: la carga inicial no terminó; se navega igual");
+    }
+    if let Err(e) = super::enable_drag(webview) {
+        eprintln!("[pulpo] {url}: arrastrar y soltar no disponible: {e}");
     }
     if let Some(blocker) = blocker.filter(|_| !crate::diag::flag("PULPO_NO_NETFILTER")) {
         if let Err(e) = enable_blocking(webview, blocker, url.to_string()) {
@@ -155,12 +158,15 @@ fn enable_blocking(
 
 /// Envía un mensaje directamente al `BrowserHost`, sin pasar por el bucle de
 /// eventos de Tauri. Se encola como tarea en el hilo de UI: mandarlo dentro del
-/// propio observador re-entra en el runtime y lo bloquea.
-fn send(browser: &Mutex<Option<UiThread>>, mut message: serde_json::Value) {
-    let Ok(id) = allocate_devtools_message_id() else {
-        return;
-    };
-    message["id"] = id.into();
+/// propio observador re-entra en el runtime y lo bloquea. Sin `id` en el
+/// mensaje se le asigna uno (cuando no hace falta reconocer la respuesta).
+pub(super) fn send(browser: &Mutex<Option<UiThread>>, mut message: serde_json::Value) {
+    if message.get("id").is_none() {
+        let Ok(id) = allocate_devtools_message_id() else {
+            return;
+        };
+        message["id"] = id.into();
+    }
     let Some(browser) = browser.lock().unwrap().as_ref().map(|b| b.0.clone()) else {
         return;
     };

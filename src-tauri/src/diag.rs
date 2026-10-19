@@ -8,6 +8,7 @@
 //! - `PULPO_UA=<user agent>`: sustituye el User-Agent de los servicios.
 //! - `PULPO_LOG_BLOCKED=1`: escribe por stderr cada petición bloqueada (Linux).
 //! - `PULPO_DEBUG_PORT=<puerto>`: abre el DevTools remoto de Chromium (Linux).
+//! - `PULPO_UPDATE_CHECK=1`: busca actualizaciones también en desarrollo.
 
 pub fn flag(name: &str) -> bool {
     std::env::var_os(name).is_some_and(|v| v != "0")

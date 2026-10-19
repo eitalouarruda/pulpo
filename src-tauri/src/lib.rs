@@ -6,6 +6,7 @@ mod popups;
 mod services;
 mod shortcuts;
 mod spellcheck;
+mod update;
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -28,10 +29,6 @@ use services::{IconSource, Preset, Service};
 /// Ancho de la barra lateral (webview "shell"), en píxeles lógicos.
 const SIDEBAR_WIDTH: f64 = 64.0;
 
-/// Etiqueta del webview de la app que se ve en la página inicial: una segunda
-/// vista de esa app, con su misma sesión.
-const HOME_PANE: &str = "home-pane";
-
 struct AppState {
     config_path: PathBuf,
     services: Mutex<Vec<Service>>,
@@ -51,8 +48,8 @@ struct AppState {
     zoom: Mutex<f64>,
     /// La página inicial se ve sin diálogos encima: ahí va el panel de abajo.
     home_pane_visible: AtomicBool,
-    /// App abierta ahora en el panel de la página inicial.
-    home_pane_app: Mutex<Option<String>>,
+    /// Versión nueva encontrada al arrancar, esperando a que el usuario acepte.
+    update: Mutex<Option<update::Release>>,
 }
 
 #[derive(Clone, Serialize)]
@@ -143,7 +140,7 @@ fn update_zoom(app: &AppHandle, force: bool) {
         .iter()
         .map(|s| s.id.clone())
         .collect();
-    for id in ids.iter().map(String::as_str).chain([HOME_PANE]) {
+    for id in &ids {
         if let Some(webview) = app.get_webview(id) {
             let _ = webview.set_zoom(zoom);
         }
@@ -296,11 +293,6 @@ fn update_service(
         let app = app.clone();
         std::thread::spawn(move || {
             close_webview(&app, &id);
-            let state = app.state::<AppState>();
-            if state.home_pane_app.lock().unwrap().as_deref() == Some(id.as_str()) {
-                close_webview(&app, HOME_PANE);
-                *state.home_pane_app.lock().unwrap() = None;
-            }
             open_missing(&app);
         });
     }
@@ -333,7 +325,6 @@ fn remove_service(app: AppHandle, id: String) -> Result<(), String> {
     }
     std::thread::spawn(move || {
         close_webview(&app, &id);
-        sync_home_pane(&app);
         layout(&app);
         // Sesión y caché del servicio: ya no sirven.
         if let Some(dir) = profile_dir(&app, &id) {
@@ -424,8 +415,76 @@ fn set_home_app(app: AppHandle, id: Option<String>) {
         }
     }
     let _ = app.emit_to("shell", "home-app-changed", id);
-    let app = app.clone();
-    std::thread::spawn(move || sync_home_pane(&app));
+    layout(&app);
+}
+
+/// Altura de la app de la página inicial, como parte de la ventana.
+#[tauri::command]
+fn get_home_pane_size(state: tauri::State<'_, AppState>) -> f64 {
+    state.settings.lock().unwrap().home_pane()
+}
+
+/// Cambia la altura de la app de la página inicial. Mientras se arrastra el
+/// divisor solo se recoloca (`save` falso); al soltarlo se guarda.
+#[tauri::command]
+fn set_home_pane_size(app: AppHandle, size: f64, save: bool) -> f64 {
+    let state = app.state::<AppState>();
+    let size = display::clamp_home_pane(size);
+    {
+        let mut settings = state.settings.lock().unwrap();
+        settings.home_pane = Some(size);
+        if save {
+            if let Err(e) = display::save(&state.settings_path, &settings) {
+                eprintln!(
+                    "[pulpo] no se pudo guardar {}: {e}",
+                    state.settings_path.display()
+                );
+            }
+        }
+    }
+    layout(&app);
+    size
+}
+
+/// Busca una versión nueva en GitHub. La barra lateral lo pide al arrancar y
+/// pregunta antes de instalar nada.
+#[tauri::command]
+async fn check_update(app: AppHandle) -> Option<update::UpdateInfo> {
+    if !update::supported() {
+        return None;
+    }
+    let current = app.package_info().version.to_string();
+    let found = tauri::async_runtime::spawn_blocking(move || update::check(&current))
+        .await
+        .ok()
+        .flatten();
+    let info = found.as_ref().map(update::Release::info);
+    *app.state::<AppState>().update.lock().unwrap() = found;
+    info
+}
+
+/// Descarga e instala la versión encontrada y cierra Pulpo; la versión nueva
+/// arranca sola. Avisa del progreso con `update-progress`.
+#[tauri::command]
+async fn install_update(app: AppHandle) -> Result<(), String> {
+    let release = app
+        .state::<AppState>()
+        .update
+        .lock()
+        .unwrap()
+        .clone()
+        .ok_or("update.none")?;
+    let current = app.package_info().version.to_string();
+    let progress_app = app.clone();
+    tauri::async_runtime::spawn_blocking(move || {
+        update::install(&release, &current, |progress| {
+            let _ = progress_app.emit_to("shell", "update-progress", progress);
+        })
+    })
+    .await
+    .map_err(|e| e.to_string())??;
+    app.exit(0);
+    Ok(())
 }
 
 /// La barra lateral avisa cuando se ve la página inicial sin diálogos.
@@ -435,43 +494,6 @@ fn set_home_pane_visible(app: AppHandle, visible: bool) {
         .home_pane_visible
         .store(visible, Ordering::SeqCst);
     layout(&app);
-}
-
-/// Abre, cambia o cierra el panel de la página inicial según el ajuste. La
-/// app tiene que existir y estar activada; si lleva bloqueo, espera al motor.
-fn sync_home_pane(app: &AppHandle) {
-    let state = app.state::<AppState>();
-    let _one_at_a_time = state.opening.lock().unwrap();
-    let wanted = state.settings.lock().unwrap().home_app.clone();
-    let service = wanted.and_then(|id| {
-        let list = state.services.lock().unwrap();
-        list.iter().find(|s| s.id == id && s.enabled).cloned()
-    });
-    let current = state.home_pane_app.lock().unwrap().clone();
-    let open = app.get_webview(HOME_PANE).is_some();
-    if open && current.as_deref() == service.as_ref().map(|s| s.id.as_str()) {
-        return;
-    }
-    if open {
-        close_webview(app, HOME_PANE);
-        *state.home_pane_app.lock().unwrap() = None;
-    }
-    let Some(service) = service else {
-        return layout(app);
-    };
-    let blocker = match (service.adblock, state.blocker.get()) {
-        (false, _) => None,
-        (true, None) => return,
-        (true, Some(blocker)) => blocker.clone(),
-    };
-    match open_service(app, &service, blocker, HOME_PANE) {
-        Ok(()) => *state.home_pane_app.lock().unwrap() = Some(service.id.clone()),
-        Err(e) => eprintln!(
-            "[pulpo] no se pudo abrir {} en la página inicial: {e}",
-            service.id
-        ),
-    }
-    layout(app);
 }
 
 #[tauri::command]
@@ -493,8 +515,8 @@ pub fn run() {
         // Chromium guarda las sesiones bajo esta raíz. Por defecto es la caché
         // del usuario; se mueve a los datos de la app para que limpiar la
         // caché no cierre la sesión de WhatsApp.
-        if let Some(dir) = data_dir() {
-            cef = cef.root_cache_path(dir.join("com.pulpo.app").join("cef"));
+        if let Some(dir) = cef_root() {
+            cef = cef.root_cache_path(dir);
         }
         if diag::flag("PULPO_BENCH") {
             // El benchmark corre con la ventana en otro escritorio: que Chromium
@@ -544,7 +566,7 @@ pub fn run() {
                 monitor: Mutex::default(),
                 zoom: Mutex::new(1.0),
                 home_pane_visible: AtomicBool::new(false),
-                home_pane_app: Mutex::default(),
+                update: Mutex::default(),
             });
 
             let window = WindowBuilder::new(app, "main")
@@ -592,6 +614,13 @@ pub fn run() {
 
             let handle = app.handle().clone();
             std::thread::spawn(move || {
+                // Reordenar arrastrando en la barra lateral (ver `platform::enable_drag`).
+                #[cfg(target_os = "linux")]
+                if let Some(shell) = handle.get_webview("shell") {
+                    if let Err(e) = platform::enable_drag(&shell) {
+                        eprintln!("[pulpo] arrastrar en la barra lateral no disponible: {e}");
+                    }
+                }
                 update_zoom(&handle, true);
                 // Los servicios sin bloqueo no esperan a las listas.
                 open_missing(&handle);
@@ -623,6 +652,10 @@ pub fn run() {
             get_home_app,
             set_home_app,
             set_home_pane_visible,
+            get_home_pane_size,
+            set_home_pane_size,
+            check_update,
+            install_update,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -631,11 +664,17 @@ pub fn run() {
 /// `$XDG_DATA_HOME`, o `~/.local/share`: lo mismo que usa Tauri para
 /// `app_data_dir`, pero disponible antes de crear la app.
 #[cfg(target_os = "linux")]
-fn data_dir() -> Option<PathBuf> {
+pub(crate) fn data_dir() -> Option<PathBuf> {
     std::env::var_os("XDG_DATA_HOME")
         .filter(|d| !d.is_empty())
         .map(Into::into)
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
+}
+
+/// Raíz de Chromium: perfiles, caché de GPU… (ver `run`).
+#[cfg(target_os = "linux")]
+pub(crate) fn cef_root() -> Option<PathBuf> {
+    data_dir().map(|dir| dir.join("com.pulpo.app").join("cef"))
 }
 
 /// Carpeta del perfil (cookies, sesión, caché) de un servicio.
@@ -682,7 +721,6 @@ fn set_enabled(app: &AppHandle, id: &str, enabled: bool) -> Result<(), String> {
             open_missing(&app);
         } else {
             close_webview(&app, &id);
-            sync_home_pane(&app);
             layout(&app);
         }
     });
@@ -771,22 +809,19 @@ fn open_missing(app: &AppHandle) {
             (true, None) => continue,
             (true, Some(blocker)) => blocker.clone(),
         };
-        if let Err(e) = open_service(app, service, blocker, &service.id) {
+        if let Err(e) = open_service(app, service, blocker) {
             eprintln!("[pulpo] no se pudo abrir {}: {e}", service.id);
         }
     }
     drop(_one_at_a_time);
-    sync_home_pane(app);
     layout(app);
 }
 
-/// Abre el webview de `service` con la etiqueta `label`: su id, o
-/// [`HOME_PANE`] para la vista de la página inicial.
+/// Abre el webview de `service`, con su id como etiqueta.
 fn open_service(
     app: &AppHandle,
     service: &Service,
     blocker: Option<Arc<Blocker>>,
-    label: &str,
 ) -> tauri::Result<()> {
     let window = app.get_window("main").expect("ventana principal");
     // Cada servicio con su perfil: cookies y sesiones separadas. En Linux la
@@ -809,7 +844,7 @@ fn open_service(
     let initial_load_tx = Mutex::new(Some(initial_load_tx));
     let id = service.id.clone();
     let mut builder =
-        WebviewBuilder::new(label, WebviewUrl::External("about:blank".parse().unwrap()))
+        WebviewBuilder::new(&id, WebviewUrl::External("about:blank".parse().unwrap()))
             .data_directory(profile)
             // Sin el manejador de soltar archivos de Tauri: no hace falta y en CEF
             // añade un paso por cada petición.
@@ -887,7 +922,7 @@ fn open_service(
             .position(LogicalPosition::new(SIDEBAR_WIDTH, 0.0))
             .size(LogicalSize::new(1.0, 1.0)),
     )?;
-    if !is_visible(app, label) {
+    if placement(app, &service.id) == Placement::Hidden {
         webview.hide()?;
     }
 
@@ -936,13 +971,34 @@ fn raise_window(app: &AppHandle) {
     display::focus_own_window();
 }
 
-fn is_visible(app: &AppHandle, id: &str) -> bool {
-    let state = app.state::<AppState>();
-    !state.overlay.load(Ordering::SeqCst) && state.active.lock().unwrap().as_deref() == Some(id)
+/// Dónde se ve el webview de una app.
+#[derive(PartialEq)]
+enum Placement {
+    Hidden,
+    /// Toda la ventana a la derecha de la barra lateral: la app activa.
+    Full,
+    /// La parte de abajo de la página inicial: la app elegida para ella. Es el
+    /// mismo webview de la app, no una copia.
+    HomePane,
 }
 
-/// Coloca la barra lateral y los servicios según el tamaño de la ventana, y
-/// deja visible solo el activo.
+fn placement(app: &AppHandle, id: &str) -> Placement {
+    let state = app.state::<AppState>();
+    let overlay = state.overlay.load(Ordering::SeqCst);
+    let active = state.active.lock().unwrap().clone();
+    if !overlay && active.as_deref() == Some(id) {
+        return Placement::Full;
+    }
+    let home = overlay && active.is_none() && state.home_pane_visible.load(Ordering::SeqCst);
+    if home && state.settings.lock().unwrap().home_app.as_deref() == Some(id) {
+        return Placement::HomePane;
+    }
+    Placement::Hidden
+}
+
+/// Coloca la barra lateral y los servicios según el tamaño de la ventana: la
+/// app activa a pantalla completa, la de la página inicial en su parte de
+/// abajo, y el resto ocultas.
 fn layout(app: &AppHandle) {
     let Some(window) = app.get_window("main") else {
         return;
@@ -960,12 +1016,6 @@ fn layout(app: &AppHandle) {
         let _ = shell.set_size(LogicalSize::new(width, size.height));
     }
     let content = LogicalSize::new((size.width - sidebar).max(1.0), size.height);
-    // Las apps ocultas se apartan fuera de la ventana (con su tamaño, para que
-    // no se re-maqueten al volver). En Linux Chromium busca el destino de un
-    // arrastre entre sus ventanas por posición, sin saber que Pulpo ocultó
-    // unas: si queda una oculta debajo del cursor, el arrastre (soltar tarjetas
-    // en Jira, etc.) se le entrega a ella y la app visible no lo recibe.
-    let offscreen = -(size.width + 100.0);
     let ids: Vec<String> = state
         .services
         .lock()
@@ -973,36 +1023,26 @@ fn layout(app: &AppHandle) {
         .iter()
         .map(|s| s.id.clone())
         .collect();
+    // La barra lateral (estirada a toda la ventana) pinta la parte de arriba de
+    // la página inicial.
+    let pane_size = state.settings.lock().unwrap().home_pane();
+    let top = (size.height * (1.0 - pane_size)).round();
     for id in ids {
         let Some(webview) = app.get_webview(&id) else {
             continue;
         };
-        let _ = webview.set_size(content);
-        if is_visible(app, &id) {
-            let _ = webview.set_position(LogicalPosition::new(sidebar, 0.0));
-            let _ = webview.show();
+        let place = placement(app, &id);
+        // Las ocultas conservan el tamaño completo: no se re-maquetan al volver.
+        let (y, height) = match place {
+            Placement::HomePane => (top, (size.height - top).max(1.0)),
+            Placement::Full | Placement::Hidden => (0.0, size.height),
+        };
+        let _ = webview.set_position(LogicalPosition::new(sidebar, y));
+        let _ = webview.set_size(LogicalSize::new(content.width, height));
+        let _ = if place == Placement::Hidden {
+            webview.hide()
         } else {
-            let _ = webview.hide();
-            let _ = webview.set_position(LogicalPosition::new(offscreen, 0.0));
-        }
-    }
-    // Panel de la página inicial: la mitad de abajo, a la derecha de la barra
-    // lateral. La barra (estirada a toda la ventana) pinta la de arriba.
-    if let Some(pane) = app.get_webview(HOME_PANE) {
-        let top = (size.height / 2.0).round();
-        let _ = pane.set_size(LogicalSize::new(
-            (size.width - sidebar).max(1.0),
-            (size.height - top).max(1.0),
-        ));
-        let home = overlay
-            && state.home_pane_visible.load(Ordering::SeqCst)
-            && state.active.lock().unwrap().is_none();
-        if home {
-            let _ = pane.set_position(LogicalPosition::new(sidebar, top));
-            let _ = pane.show();
-        } else {
-            let _ = pane.hide();
-            let _ = pane.set_position(LogicalPosition::new(offscreen, top));
-        }
+            webview.show()
+        };
     }
 }

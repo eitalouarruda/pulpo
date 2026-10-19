@@ -36,8 +36,9 @@ session, and ads are blocked with the same engine and filter lists as Brave.
   <kbd>Esc</kbd> three times inside any app to get back to it.
 - **One app on the home page.** Optionally pick one app to show in the bottom
   half of the home page (⚙ → *App on the home page*, or right-click → *Show on
-  home page*). It's a second view of that app with the same session, so it's
-  still available full size from its own button.
+  home page*). It's the app itself, not a copy: open it from its button and
+  you're on the same page, full size. Drag the bar between them to resize it
+  (double-click: back to half); Pulpo remembers the size.
 - **Groups and your own order.** Put apps in groups (Work, Personal…),
   collapse them, and drag icons to reorder them.
 - **Your icons.** The site's own icon is downloaded automatically; you can also
@@ -115,6 +116,12 @@ Download the latest release from
   menu. It bundles its own Chromium, so it works on any recent distro.
 - **Windows**: `Pulpo_<version>_x64-setup.exe` (or the `.msi`). It uses
   WebView2, which already comes with Windows.
+
+**Updates.** When Pulpo starts it checks the latest GitHub release and, if
+there's a newer one, asks before doing anything. If you say yes it downloads
+it and restarts on the new version: the AppImage replaces itself (only one
+file is left, and AppImageLauncher's menu entry follows it); on Windows the
+installer runs in passive mode and keeps your data.
 
 ## How ad blocking works
 

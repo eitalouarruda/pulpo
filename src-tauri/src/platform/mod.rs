@@ -9,6 +9,10 @@
 mod linux;
 #[cfg(target_os = "linux")]
 pub use linux::*;
+#[cfg(target_os = "linux")]
+mod linux_drag;
+#[cfg(target_os = "linux")]
+pub use linux_drag::enable_drag;
 
 #[cfg(windows)]
 mod windows;

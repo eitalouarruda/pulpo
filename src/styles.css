@@ -493,6 +493,12 @@ label.check small {
   display: none;
 }
 
+#update-progress {
+  width: 100%;
+  height: 6px;
+  accent-color: var(--accent);
+}
+
 #switcher-empty {
   padding: 6px 8px;
 }
@@ -904,8 +910,77 @@ kbd {
    abajo la tapa el webview de esa app. */
 body.split #overlay.home-mode {
   align-self: flex-start;
-  height: 50%;
+  height: calc(100% * (1 - var(--pane, 0.5)));
   border-bottom: 1px solid var(--line);
+}
+
+/* Divisor arrastrable justo encima del borde entre la página inicial y su app
+   (lo que quede debajo del borde lo taparía el webview de la app). */
+#pane-handle {
+  display: none;
+  position: fixed;
+  left: 64px;
+  right: 0;
+  top: calc(100% * (1 - var(--pane, 0.5)) - 14px);
+  height: 14px;
+  cursor: row-resize;
+  touch-action: none;
+  z-index: 10;
+}
+
+body.split #pane-handle {
+  display: block;
+}
+
+#pane-handle::after {
+  content: "";
+  position: absolute;
+  left: 50%;
+  bottom: 4px;
+  width: 48px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--line);
+  transform: translateX(-50%);
+  transition: background 0.15s;
+}
+
+#pane-handle:hover::after,
+#pane-handle.dragging::after {
+  background: var(--accent);
+}
+
+/* Con muy poco sitio arriba (la app ocupa casi todo) quedan solo los iconos,
+   por encima del divisor. */
+body.split.pane-tight #overlay.home-mode {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+body.split.pane-tight #home-view {
+  padding: 6px 8px 0;
+}
+
+body.split.pane-tight #home-groups {
+  gap: 4px 16px;
+}
+
+body.split.pane-tight .home-group h3,
+body.split.pane-tight .home-name {
+  display: none;
+}
+
+body.split.pane-tight .home-app {
+  width: auto;
+  padding: 2px;
+}
+
+#home-pane-row[hidden] {
+  display: none;
+}
+
+body.resizing-pane {
+  cursor: row-resize;
 }
 
 /* Página inicial compacta cuando comparte la pantalla con una app: grupos uno

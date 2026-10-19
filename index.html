@@ -70,6 +70,10 @@
           <span data-i18n="manage.homeApp"></span>
           <div id="home-app" class="segmented wrap" role="radiogroup"></div>
         </div>
+        <div class="zoom-row" id="home-pane-row">
+          <span data-i18n="manage.homePaneSize"></span>
+          <div id="home-pane-size" class="segmented" role="radiogroup"></div>
+        </div>
         <div class="zoom-row">
           <span data-i18n="manage.language"></span>
           <!-- Botones y no <select>: su lista nativa se cierra sola dentro del webview. -->
@@ -117,6 +121,17 @@
         </footer>
       </form>
 
+      <section class="card" id="update-view" hidden>
+        <h2 id="update-title"></h2>
+        <p id="update-body" data-i18n="update.body"></p>
+        <progress id="update-progress" max="1" value="0" hidden></progress>
+        <p id="update-error" class="error" role="alert"></p>
+        <footer>
+          <button type="button" class="ghost" id="update-later" data-close data-i18n="update.later"></button>
+          <button type="button" id="update-install" data-i18n="update.install"></button>
+        </footer>
+      </section>
+
       <section class="card" id="confirm-view" hidden>
         <h2 id="confirm-title"></h2>
         <p data-i18n="confirm.body"></p>
@@ -126,6 +141,9 @@
         </footer>
       </section>
     </div>
+
+    <!-- Divisor entre la página inicial y su app: se arrastra para cambiar la altura. -->
+    <div id="pane-handle" role="separator" aria-orientation="horizontal" data-i18n-title="home.paneHandle"></div>
 
     <script type="module" src="/src/main.ts"></script>
   </body>
