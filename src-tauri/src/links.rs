@@ -25,6 +25,7 @@ pub struct LinkRule {
 /// y clic central en un enlace no pasan por `on_new_window`: Chromium abre una
 /// ventana suelta que no se ve. Los de `window.open` sí pasan, así que el
 /// script los convierte. (`target="_blank"` ya pasa por `on_new_window`.)
+#[cfg(target_os = "linux")]
 pub const SCRIPT: &str = include_str!("links.js");
 
 /// La primera regla que cubre `url`.
