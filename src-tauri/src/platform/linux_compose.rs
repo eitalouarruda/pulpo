@@ -259,9 +259,23 @@ fn script(dead: &DeadKeys, table: &str) -> String {
     }}
   }};
   const MODIFIERS = new Set(["Shift", "Control", "Alt", "AltGraph", "Meta", "CapsLock", "NumLock", "Super", "Hyper", "Fn"]);
+  // Como lo haría el motor al escribir: los editores con modelo propio
+  // (Slate en Discord, Draft…) escuchan `beforeinput`/`textInput` e insertan
+  // ellos; `execCommand` solo toca el DOM sin avisar y al redibujar lo
+  // revierten. Si nadie lo atiende, se inserta con `execCommand`.
   const insert = (text) => {{
-    if (document.execCommand("insertText", false, text)) return;
     const el = document.activeElement;
+    const target = el && el !== document.body ? el : document;
+    const before = new InputEvent("beforeinput", {{
+      bubbles: true, cancelable: true, composed: true, inputType: "insertText", data: text,
+    }});
+    if (!target.dispatchEvent(before)) return;
+    if (typeof TextEvent === "function") {{
+      const textInput = document.createEvent("TextEvent");
+      textInput.initTextEvent("textInput", true, true, window, text);
+      if (!target.dispatchEvent(textInput)) return;
+    }}
+    if (document.execCommand("insertText", false, text)) return;
     if (el && typeof el.setRangeText === "function" && typeof el.selectionStart === "number") {{
       el.setRangeText(text, el.selectionStart, el.selectionEnd, "end");
       el.dispatchEvent(new InputEvent("input", {{ bubbles: true, inputType: "insertText", data: text }}));
