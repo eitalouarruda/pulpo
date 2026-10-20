@@ -187,6 +187,8 @@ button {
   flex: 1;
   display: grid;
   place-items: center;
+  /* Fila de altura fija: así el max-height: 100% de las tarjetas se cumple. */
+  grid-template-rows: minmax(0, 1fr);
   padding: 24px;
   border-left: 1px solid var(--line);
   background: #111117;
@@ -215,7 +217,7 @@ button {
 }
 
 form.card {
-  width: min(440px, 100%);
+  width: min(480px, 100%);
 }
 
 .card h2 {
@@ -512,8 +514,15 @@ label.check small {
   margin: 0;
   padding: 0;
   list-style: none;
+}
+
+/* Todo el diálogo hace scroll cuando no cabe, no solo la lista. */
+#manage-view {
   overflow-y: auto;
-  min-height: 0;
+}
+
+#manage-view > * {
+  flex-shrink: 0;
 }
 
 #manage-list li {
@@ -737,6 +746,7 @@ label.check small {
 
 #overlay.home-mode {
   place-items: start center;
+  grid-template-rows: auto;
   overflow-y: auto;
   background: var(--bg);
 }
@@ -975,10 +985,6 @@ body.split.pane-tight .home-app {
   padding: 2px;
 }
 
-#home-pane-row[hidden] {
-  display: none;
-}
-
 body.resizing-pane {
   cursor: row-resize;
 }
@@ -1035,4 +1041,92 @@ body.split .home-name {
 
 body.split .home-hint {
   display: none;
+}
+
+/* ------------------------------------------------------------ no molestar */
+
+.dnd-mark {
+  position: absolute;
+  right: -5px;
+  bottom: -5px;
+  width: 17px;
+  height: 17px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--panel);
+  color: #c4b5fd;
+  font-size: 11px;
+  line-height: 15px;
+  text-align: center;
+}
+
+#f-dnd-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+#f-dnd-list:empty {
+  display: none;
+}
+
+.dnd-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.dnd-row > span {
+  color: var(--muted);
+}
+
+.dnd-days {
+  display: flex;
+  gap: 2px;
+  margin-right: auto;
+}
+
+.dnd-days button {
+  width: 24px;
+  height: 28px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: none;
+  color: var(--muted);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.dnd-days button[aria-pressed="true"] {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #fff;
+}
+
+.dnd-row input[type="time"] {
+  width: auto;
+  padding: 5px 6px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--field);
+  color: var(--fg);
+  font: inherit;
+  color-scheme: dark;
+}
+
+/* El selector nativo no se abre bien dentro del webview: se escribe la hora. */
+.dnd-row input[type="time"]::-webkit-calendar-picker-indicator {
+  display: none;
+}
+
+.dnd-add {
+  align-self: flex-start;
+}
+
+.dnd-hint {
+  color: var(--muted);
+  font-size: 12px;
 }

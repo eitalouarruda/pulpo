@@ -30,6 +30,8 @@ serde_json.workspace = true
 # Descarga de iconos de los servicios.
 ureq = "3"
 base64 = "0.22"
+# Hora local para los horarios de no molestar.
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
 
 # Linux: Chromium (CEF). WebKitGTK es ~3 veces más lento navegando YouTube Music.
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -37,6 +39,8 @@ blocker = { path = "crates/blocker" }
 tauri-runtime-cef = { version = "=3.0.0-alpha.5", features = ["unstable"] }
 # Seguir el puntero durante un arrastre (ver `platform/linux_drag.rs`).
 x11-dl = "2.21"
+# Tabla de compose de libxkbcommon (ver `platform/linux_compose.rs`).
+libloading = "0.8"
 
 # Windows: WebView2, que ya es Chromium y viene con el sistema.
 [target.'cfg(windows)'.dependencies]

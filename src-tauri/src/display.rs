@@ -99,6 +99,13 @@ pub fn focus_own_window() {
     hyprland::focus_window(std::process::id());
 }
 
+/// Devuelve el foco a la ventana de Pulpo si Hyprland se lo da a una de sus
+/// ventanas auxiliares (ver `hyprland::guard_focus`). Anota cada vez en `log`.
+#[cfg(target_os = "linux")]
+pub fn guard_focus(log: std::path::PathBuf) {
+    std::thread::spawn(move || hyprland::guard_focus(std::process::id(), &log));
+}
+
 #[cfg(target_os = "linux")]
 mod hyprland {
     //! Consulta a Hyprland por su socket de control (lo mismo que `hyprctl`).
@@ -121,16 +128,112 @@ mod hyprland {
         Some(reply)
     }
 
+    /// Despacha `focuswindow` con `target` (`pid:…`, `address:…`), en la
+    /// sintaxis clásica o, si no responde `ok`, en la de Lua.
+    fn dispatch_focus(target: &str) {
+        let ok = |reply: Option<Vec<u8>>| reply.is_some_and(|r| r.trim_ascii() == b"ok");
+        if !ok(request(&format!("dispatch focuswindow {target}"))) {
+            let _ = request(&format!(
+                r#"dispatch hl.dsp.focus({{ window = "{target}" }})"#
+            ));
+        }
+    }
+
+    #[derive(Deserialize)]
+    struct Client {
+        address: String,
+        pid: i64,
+        title: String,
+    }
+
+    /// Chromium y el runtime crean ventanas X auxiliares sin título ni tipo
+    /// (1×1, `override-redirect`). Si Hyprland le da el foco a una, el teclado
+    /// deja de llegar a las apps aunque Pulpo se vea activa, y un clic no lo
+    /// arregla (para Hyprland la ventana ya tiene el foco); cambiar de
+    /// escritorio y volver sí. Esto hace lo mismo solo: escucha los cambios de
+    /// ventana activa y, si es una de Pulpo sin título, enfoca la principal.
+    pub fn guard_focus(pid: u32, log: &std::path::Path) {
+        use std::io::BufRead;
+        let (Ok(signature), Ok(runtime)) = (
+            std::env::var("HYPRLAND_INSTANCE_SIGNATURE"),
+            std::env::var("XDG_RUNTIME_DIR"),
+        ) else {
+            return;
+        };
+        let socket = format!("{runtime}/hypr/{signature}/.socket2.sock");
+        loop {
+            if let Ok(stream) = UnixStream::connect(&socket) {
+                for line in std::io::BufReader::new(stream).lines() {
+                    let Ok(line) = line else { break };
+                    if let Some(address) = line.strip_prefix("activewindowv2>>") {
+                        check_focus(pid, address, log);
+                    }
+                }
+            }
+            // Hyprland reiniciado o socket cerrado: se reintenta.
+            std::thread::sleep(Duration::from_secs(5));
+        }
+    }
+
+    fn check_focus(pid: u32, address: &str, log: &std::path::Path) {
+        let address = address.trim().trim_start_matches("0x");
+        if address.is_empty() || address == "," {
+            return;
+        }
+        let Some(clients) =
+            request("j/clients").and_then(|r| serde_json::from_slice::<Vec<Client>>(&r).ok())
+        else {
+            return;
+        };
+        let ours = |c: &&Client| c.pid == pid as i64;
+        let Some(active) = clients
+            .iter()
+            .filter(ours)
+            .find(|c| c.address.trim_start_matches("0x") == address)
+        else {
+            return;
+        };
+        if !active.title.is_empty() {
+            return;
+        }
+        let Some(main) = clients.iter().filter(ours).find(|c| c.title == "Pulpo") else {
+            return;
+        };
+        note(
+            log,
+            &format!(
+                "foco en una ventana auxiliar ({}); se devuelve a {}",
+                active.address, main.address
+            ),
+        );
+        dispatch_focus(&format!("address:{}", main.address));
+    }
+
+    /// Una línea con la hora en `log` (que no crece sin límite).
+    fn note(log: &std::path::Path, message: &str) {
+        use std::io::Write as _;
+        eprintln!("[pulpo] {message}");
+        if std::fs::metadata(log).is_ok_and(|m| m.len() > 64 * 1024) {
+            let _ = std::fs::remove_file(log);
+        }
+        let secs = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_secs())
+            .unwrap_or_default();
+        if let Ok(mut file) = std::fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(log)
+        {
+            let _ = writeln!(file, "{secs} {message}");
+        }
+    }
+
     /// Enfoca la ventana del proceso `pid`. Con la configuración en Lua
     /// (Hyprland 0.55+) `dispatch` espera la sintaxis de `hl.dsp` y rechaza la
     /// clásica: se prueba la clásica y, si no responde `ok`, la de Lua.
     pub fn focus_window(pid: u32) {
-        let ok = |reply: Option<Vec<u8>>| reply.is_some_and(|r| r.trim_ascii() == b"ok");
-        if !ok(request(&format!("dispatch focuswindow pid:{pid}"))) {
-            let _ = request(&format!(
-                r#"dispatch hl.dsp.focus({{ window = "pid:{pid}" }})"#
-            ));
-        }
+        dispatch_focus(&format!("pid:{pid}"));
     }
 
     #[derive(Deserialize)]

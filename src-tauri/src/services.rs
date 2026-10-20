@@ -25,6 +25,72 @@ pub struct Service {
     pub adblock: bool,
     /// Desactivado: sin webview, no consume memoria.
     pub enabled: bool,
+    /// No molestar: sin avisos ni sonidos en sus horarios o mientras está
+    /// silenciada a mano. Los contadores siguen.
+    #[serde(default, skip_serializing_if = "Dnd::is_empty")]
+    pub dnd: Dnd,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct Dnd {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub schedules: Vec<DndSchedule>,
+    /// Silenciada a mano hasta este instante (segundos Unix).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub until: Option<i64>,
+}
+
+/// Un horario semanal. Si `end` no es posterior a `start` pasa la medianoche:
+/// cuenta como del día en que empieza (lunes 22:00 a 08:00 = hasta el martes a
+/// las 8). Igual inicio y fin: el día entero.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DndSchedule {
+    /// Días en que empieza: 0 = lunes … 6 = domingo.
+    pub days: Vec<u8>,
+    /// Minutos desde la medianoche.
+    pub start: u16,
+    pub end: u16,
+}
+
+impl Dnd {
+    fn is_empty(&self) -> bool {
+        self.schedules.is_empty() && self.until.is_none()
+    }
+
+    /// Activo en este instante: `weekday` (0 = lunes), `minute` desde la
+    /// medianoche (hora local) y `now` en segundos Unix.
+    pub fn active(&self, weekday: u8, minute: u16, now: i64) -> bool {
+        self.until.is_some_and(|until| now < until)
+            || self.schedules.iter().any(|s| s.active(weekday, minute))
+    }
+
+    /// Horarios válidos: días sin repetir dentro de la semana, minutos dentro
+    /// del día y sin horarios sin días.
+    pub fn clean_schedules(schedules: Vec<DndSchedule>) -> Vec<DndSchedule> {
+        schedules
+            .into_iter()
+            .filter_map(|mut s| {
+                s.days.retain(|d| *d < 7);
+                s.days.sort_unstable();
+                s.days.dedup();
+                (!s.days.is_empty() && s.start < 24 * 60 && s.end < 24 * 60).then_some(s)
+            })
+            .collect()
+    }
+}
+
+impl DndSchedule {
+    fn active(&self, weekday: u8, minute: u16) -> bool {
+        let today = self.days.contains(&weekday);
+        if self.start == self.end {
+            return today;
+        }
+        if self.start < self.end {
+            return today && (self.start..self.end).contains(&minute);
+        }
+        let yesterday = self.days.contains(&((weekday + 6) % 7));
+        (today && minute >= self.start) || (yesterday && minute < self.end)
+    }
 }
 
 /// De dónde sale el icono de la barra lateral.
@@ -115,6 +181,7 @@ fn defaults() -> Vec<Service> {
             group: None,
             adblock: false,
             enabled: true,
+            dnd: Dnd::default(),
         },
         Service {
             id: "ytmusic".into(),
@@ -126,6 +193,7 @@ fn defaults() -> Vec<Service> {
             group: None,
             adblock: true,
             enabled: true,
+            dnd: Dnd::default(),
         },
     ]
 }
@@ -315,6 +383,74 @@ mod tests {
         let id = new_id(&services);
         assert!(id.starts_with("s-") && id.len() == 10);
         assert!(id.chars().all(|c| c.is_ascii_alphanumeric() || c == '-'));
+    }
+
+    #[test]
+    fn dnd_schedules() {
+        let night = DndSchedule {
+            days: vec![0, 1, 2, 3, 4], // lunes a viernes
+            start: 22 * 60,
+            end: 8 * 60,
+        };
+        let dnd = Dnd {
+            schedules: vec![night],
+            until: None,
+        };
+        assert!(dnd.active(0, 23 * 60, 0)); // lunes 23:00
+        assert!(dnd.active(1, 7 * 60, 0)); // martes 07:00 (del lunes)
+        assert!(!dnd.active(1, 9 * 60, 0)); // martes 09:00
+        assert!(dnd.active(5, 7 * 60, 0)); // sábado 07:00 (del viernes)
+        assert!(!dnd.active(5, 23 * 60, 0)); // sábado 23:00
+        assert!(!dnd.active(0, 7 * 60, 0)); // lunes 07:00 (domingo no cuenta)
+
+        let lunch = Dnd {
+            schedules: vec![DndSchedule {
+                days: vec![2],
+                start: 12 * 60,
+                end: 13 * 60,
+            }],
+            until: None,
+        };
+        assert!(lunch.active(2, 12 * 60 + 30, 0));
+        assert!(!lunch.active(2, 13 * 60, 0));
+
+        let all_day = Dnd {
+            schedules: vec![DndSchedule {
+                days: vec![6],
+                start: 0,
+                end: 0,
+            }],
+            until: None,
+        };
+        assert!(all_day.active(6, 0, 0) && all_day.active(6, 1439, 0));
+        assert!(!all_day.active(0, 0, 0));
+
+        let manual = Dnd {
+            schedules: vec![],
+            until: Some(100),
+        };
+        assert!(manual.active(0, 0, 99));
+        assert!(!manual.active(0, 0, 100));
+
+        let cleaned = Dnd::clean_schedules(vec![
+            DndSchedule {
+                days: vec![3, 9, 1, 3],
+                start: 60,
+                end: 120,
+            },
+            DndSchedule {
+                days: vec![],
+                start: 60,
+                end: 120,
+            },
+            DndSchedule {
+                days: vec![1],
+                start: 1440,
+                end: 0,
+            },
+        ]);
+        assert_eq!(cleaned.len(), 1);
+        assert_eq!(cleaned[0].days, [1, 3]);
     }
 
     #[test]

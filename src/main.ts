@@ -13,6 +13,22 @@ interface Service {
   group?: string | null;
   adblock: boolean;
   enabled: boolean;
+  dnd?: Dnd;
+}
+
+/// No molestar: horarios semanales y silencio manual (como en `services.rs`).
+interface Dnd {
+  schedules?: DndSchedule[];
+  /// Silenciada a mano hasta este instante (segundos Unix).
+  until?: number | null;
+}
+
+interface DndSchedule {
+  /// 0 = lunes … 6 = domingo.
+  days: number[];
+  /// Minutos desde la medianoche.
+  start: number;
+  end: number;
 }
 
 type IconSource = "web" | "custom" | "letter";
@@ -63,6 +79,8 @@ let services: Service[] = [];
 let homeApp: string | null = null;
 let active: string | null = null;
 const badges = new Map<string, number>();
+/// Apps con no molestar activo ahora (lo decide Rust).
+let dndActive = new Set<string>();
 
 // ---------------------------------------------------------------- barra lateral
 
@@ -184,6 +202,7 @@ function renderHome() {
       const count = badges.get(s.id) ?? 0;
       badge.textContent = count > 0 ? String(count) : "";
       icon.append(badge);
+      if (dndActive.has(s.id)) icon.append(dndMark());
       const name = document.createElement("span");
       name.className = "home-name";
       name.textContent = s.name;
@@ -235,7 +254,12 @@ function serviceButton(s: Service, index: number) {
   button.className = "service";
   button.dataset.id = s.id;
   button.draggable = true;
-  button.title = [s.name, index < 9 ? `Ctrl+${index + 1}` : "", s.enabled ? "" : t("service.disabled")]
+  button.title = [
+    s.name,
+    index < 9 ? `Ctrl+${index + 1}` : "",
+    s.enabled ? "" : t("service.disabled"),
+    dndActive.has(s.id) ? t("dnd.active") : "",
+  ]
     .filter(Boolean)
     .join(" · ");
   button.setAttribute("aria-current", String(s.id === active));
@@ -248,6 +272,7 @@ function serviceButton(s: Service, index: number) {
   const count = badges.get(s.id) ?? 0;
   badge.textContent = count > 0 ? String(count) : "";
   button.append(badge);
+  if (dndActive.has(s.id)) button.append(dndMark());
 
   button.addEventListener("click", () => select(s.id));
   button.addEventListener("auxclick", (e) => {
@@ -258,6 +283,15 @@ function serviceButton(s: Service, index: number) {
     openMenu(s, button.getBoundingClientRect().top);
   });
   return button;
+}
+
+/// Luna en la esquina del icono de una app en no molestar.
+function dndMark() {
+  const mark = document.createElement("span");
+  mark.className = "dnd-mark";
+  mark.textContent = "☾";
+  mark.title = t("dnd.active");
+  return mark;
 }
 
 /// Pone el icono (imagen o inicial con color) dentro de `el`.
@@ -435,14 +469,12 @@ function renderHomeAppChoice() {
 function setHomeApp(id: string | null) {
   homeApp = id;
   renderHomeAppChoice();
-  renderPaneChoice();
   syncHomePane();
   invoke("set_home_app", { id }).catch(console.error);
 }
 
 function renderManage() {
   renderHomeAppChoice();
-  renderPaneChoice();
   const list = $("#manage-list");
   list.replaceChildren(
     ...services.map((s) => {
@@ -571,15 +603,64 @@ function openMenu(s: Service, top: number, left?: number) {
       disabled: !s.enabled,
     }),
     sep(),
+    ...dndItems(s, item),
+    sep(),
     item(t("action.editMenu"), () => openForm(s, s.id), { dialog: true }),
     item(t(s.enabled ? "action.disable" : "action.enable"), () =>
       invoke("set_service_enabled", { id: s.id, enabled: !s.enabled }).catch(console.error),
     ),
     item(t("action.removeMenu"), () => askRemove(s.id), { danger: true, dialog: true }),
   );
-  menu.style.top = `${Math.max(8, Math.min(top, window.innerHeight - 260))}px`;
   menu.style.left = left === undefined ? "" : `${Math.min(left, window.innerWidth - 230)}px`;
   openOverlay("menu");
+  // Ya visible, con su altura real: que no se salga por abajo.
+  menu.style.top = `${Math.max(8, Math.min(top, window.innerHeight - menu.offsetHeight - 8))}px`;
+}
+
+/// Opciones de no molestar del menú: silenciar a mano o reactivar.
+function dndItems(
+  s: Service,
+  item: (label: string, action: () => void, opts?: { disabled?: boolean }) => HTMLElement,
+) {
+  const silence = (until: number | null) =>
+    invoke("silence_service", { id: s.id, until }).catch(console.error);
+  const now = Date.now() / 1000;
+  const until = s.dnd?.until ?? null;
+  if (until !== null && until > now) {
+    const label =
+      until >= FOREVER ? t("dnd.resume") : t("dnd.resumeUntil", { time: formatUntil(until) });
+    return [item(label, () => silence(null))];
+  }
+  const items = [
+    item(t("dnd.hour"), () => silence(Math.round(now) + 3600)),
+    item(t("dnd.tomorrow"), () => silence(nextMorning())),
+    item(t("dnd.forever"), () => silence(FOREVER)),
+  ];
+  // En horario de no molestar: se avisa (el horario se cambia en Editar).
+  if (dndActive.has(s.id)) items.unshift(item(t("dnd.scheduled"), () => {}, { disabled: true }));
+  return items;
+}
+
+/// "Hasta que la reactive": 31/12/9999.
+const FOREVER = 253402300799;
+
+/// Las próximas 8:00 (segundos Unix).
+function nextMorning() {
+  const d = new Date();
+  if (d.getHours() >= 8) d.setDate(d.getDate() + 1);
+  d.setHours(8, 0, 0, 0);
+  return Math.round(d.getTime() / 1000);
+}
+
+/// La hora (y el día si no es hoy) de un instante.
+function formatUntil(until: number) {
+  const d = new Date(until * 1000);
+  const sameDay = d.toDateString() === new Date().toDateString();
+  return d.toLocaleString(currentLanguage(), {
+    weekday: sameDay ? undefined : "short",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 function askRemove(id: string) {
@@ -611,6 +692,7 @@ interface FormInit {
   group?: string | null;
   icon?: string | null;
   icon_source?: IconSource;
+  dnd?: Dnd;
 }
 
 function openForm(init: FormInit, edit: string | null) {
@@ -627,6 +709,8 @@ function openForm(init: FormInit, edit: string | null) {
     ),
   );
   formColor = init.color ?? "#8e4ec6";
+  formSchedules = structuredClone(init.dnd?.schedules ?? []);
+  renderSchedules();
   iconChoice = { source: init.icon_source ?? "web", icon: init.icon ?? null };
   renderIconPreview();
   form.error.textContent = "";
@@ -643,6 +727,73 @@ function renderIconPreview() {
 }
 
 form.name.addEventListener("input", renderIconPreview);
+
+/// Horarios de no molestar del formulario (se guardan al guardar).
+let formSchedules: DndSchedule[] = [];
+
+const toTime = (minutes: number) =>
+  `${String(Math.floor(minutes / 60)).padStart(2, "0")}:${String(minutes % 60).padStart(2, "0")}`;
+const fromTime = (value: string) => {
+  const [h, m] = value.split(":").map(Number);
+  return Number.isFinite(h) && Number.isFinite(m) ? h * 60 + m : null;
+};
+
+function renderSchedules() {
+  const letters = [...t("dnd.days")];
+  $("#f-dnd-list").replaceChildren(
+    ...formSchedules.map((sched, i) => {
+      const row = document.createElement("div");
+      row.className = "dnd-row";
+      const days = document.createElement("div");
+      days.className = "dnd-days";
+      for (const [day, letter] of letters.entries()) {
+        const b = document.createElement("button");
+        b.type = "button";
+        b.textContent = letter;
+        b.title = new Date(2024, 0, 1 + day).toLocaleDateString(currentLanguage(), { weekday: "long" });
+        b.setAttribute("aria-pressed", String(sched.days.includes(day)));
+        b.addEventListener("click", () => {
+          sched.days = sched.days.includes(day)
+            ? sched.days.filter((d) => d !== day)
+            : [...sched.days, day].sort();
+          b.setAttribute("aria-pressed", String(sched.days.includes(day)));
+        });
+        days.append(b);
+      }
+      const time = (key: "start" | "end") => {
+        const input = document.createElement("input");
+        input.type = "time";
+        input.step = "300";
+        input.required = true;
+        input.value = toTime(sched[key]);
+        input.addEventListener("change", () => {
+          const minutes = fromTime(input.value);
+          if (minutes !== null) sched[key] = minutes;
+        });
+        return input;
+      };
+      const to = document.createElement("span");
+      to.textContent = t("dnd.to");
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "ghost-btn icon-btn";
+      remove.textContent = "×";
+      remove.title = t("dnd.remove");
+      remove.addEventListener("click", () => {
+        formSchedules.splice(i, 1);
+        renderSchedules();
+      });
+      row.append(days, time("start"), to, time("end"), remove);
+      return row;
+    }),
+  );
+}
+
+$("#f-dnd-add").addEventListener("click", () => {
+  // Lo más común: de noche, de lunes a viernes.
+  formSchedules.push({ days: [0, 1, 2, 3, 4], start: 22 * 60, end: 8 * 60 });
+  renderSchedules();
+});
 
 /// Reduce la imagen elegida a 128×128 (PNG), para que `services.json` no crezca.
 function loadIcon(file: File): Promise<string> {
@@ -750,6 +901,10 @@ views.form.addEventListener("submit", async (e) => {
       id = (await invoke<Service>("add_service", args)).id;
       active = id;
     }
+    const schedules = formSchedules.filter((sched) => sched.days.length > 0);
+    if (JSON.stringify(schedules) !== JSON.stringify(before?.dnd?.schedules ?? [])) {
+      await invoke("set_dnd_schedules", { id, schedules });
+    }
     const iconChanged =
       !before ||
       before.icon_source !== iconChoice.source ||
@@ -786,11 +941,6 @@ $("#sidebar").addEventListener("mousedown", () => {
 /// Parte de la altura que ocupa la app de abajo (como en Rust: 0,15 a 0,92).
 let paneSize = 0.5;
 const clampPane = (size: number) => Math.min(0.92, Math.max(0.15, size));
-const PANE_PRESETS = [
-  ["manage.homePaneSmall", 1 / 3],
-  ["manage.homePaneHalf", 1 / 2],
-  ["manage.homePaneLarge", 2 / 3],
-] as const;
 
 /// Por debajo de esta altura (px CSS) la página inicial deja solo los iconos.
 const TIGHT_HOME = 130;
@@ -808,23 +958,6 @@ function setPaneSize(size: number, save: boolean) {
   return invoke<number>("set_home_pane_size", { size: paneSize, save })
     .then(applyPaneSize)
     .catch(console.error);
-}
-
-function renderPaneChoice() {
-  const row = $("#home-pane-row");
-  row.hidden = homeApp === null;
-  $("#home-pane-size").replaceChildren(
-    ...PANE_PRESETS.map(([label, size]) => {
-      const b = document.createElement("button");
-      b.type = "button";
-      b.role = "radio";
-      b.className = "ghost-btn";
-      b.textContent = t(label);
-      b.setAttribute("aria-checked", String(Math.abs(paneSize - size) < 0.01));
-      b.addEventListener("click", () => setPaneSize(size, true).then(renderPaneChoice));
-      return b;
-    }),
-  );
 }
 
 // Arrastrar el divisor. Con el botón pulsado los movimientos siguen llegando
@@ -1068,6 +1201,7 @@ applyI18n();
 homeApp = await invoke<string | null>("get_home_app");
 applyPaneSize(await invoke<number>("get_home_pane_size"));
 services = await invoke<Service[]>("list_services");
+dndActive = new Set(await invoke<string[]>("dnd_active"));
 active = await invoke<string | null>("active_service");
 if (active) recent = [active];
 renderSidebar();
@@ -1100,6 +1234,11 @@ await listen<{ id: string; count: number }>("badge", ({ payload }) => {
   if (group && collapsed.has(group)) return renderSidebar();
   const badge = nav.querySelector(`.service[data-id="${CSS.escape(payload.id)}"] .badge`);
   if (badge) badge.textContent = payload.count > 0 ? String(payload.count) : "";
+  if (!overlay.hidden && currentView() === "home") renderHome();
+});
+await listen<string[]>("dnd-changed", ({ payload }) => {
+  dndActive = new Set(payload);
+  renderSidebar();
   if (!overlay.hidden && currentView() === "home") renderHome();
 });
 // Atajos pulsados dentro de una app (los detecta su script de inicio).

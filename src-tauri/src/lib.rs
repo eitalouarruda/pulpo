@@ -1,5 +1,6 @@
 mod diag;
 mod display;
+mod dnd;
 mod icons;
 mod platform;
 mod popups;
@@ -8,9 +9,10 @@ mod shortcuts;
 mod spellcheck;
 mod update;
 
+use std::collections::BTreeSet;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex, OnceLock};
+use std::sync::{Arc, Condvar, Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
 use blocker::Blocker;
@@ -24,7 +26,7 @@ use tauri::{
 };
 use tauri_plugin_opener::OpenerExt;
 
-use services::{IconSource, Preset, Service};
+use services::{Dnd, DndSchedule, IconSource, Preset, Service};
 
 /// Ancho de la barra lateral (webview "shell"), en píxeles lógicos.
 const SIDEBAR_WIDTH: f64 = 64.0;
@@ -50,6 +52,30 @@ struct AppState {
     home_pane_visible: AtomicBool,
     /// Versión nueva encontrada al arrancar, esperando a que el usuario acepte.
     update: Mutex<Option<update::Release>>,
+    /// Apps con no molestar activo ahora (ver `dnd`).
+    dnd: Mutex<BTreeSet<String>>,
+    /// Pedidos de recolocar los webviews (ver `layout`).
+    layout: LayoutQueue,
+}
+
+/// Recolocar los webviews lo hace un solo hilo (`layout_worker`), en orden.
+/// `layout` se pide desde muchos hilos a la vez (comandos de la barra lateral,
+/// atajos, apertura de apps…), y cada pasada lee el estado y después manda
+/// mostrar u ocultar: dos pasadas a la vez se pisaban y una vieja podía dejar
+/// oculta la app de la página inicial después de que una nueva la mostrara.
+/// No sirve un `Mutex` alrededor: una pasada espera al hilo principal (tamaño
+/// de la ventana) y el hilo principal también pide pasadas.
+#[derive(Default)]
+struct LayoutQueue {
+    request: Mutex<LayoutRequest>,
+    wake: Condvar,
+}
+
+#[derive(Default)]
+struct LayoutRequest {
+    pending: bool,
+    /// Webview que recibe el foco después de la pasada (ya visible).
+    focus: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -193,10 +219,7 @@ fn active_service(state: tauri::State<'_, AppState>) -> Option<String> {
 #[tauri::command]
 fn activate_service(app: AppHandle, id: String) {
     *app.state::<AppState>().active.lock().unwrap() = Some(id.clone());
-    layout(&app);
-    if let Some(webview) = app.get_webview(&id) {
-        let _ = webview.set_focus();
-    }
+    request_layout(&app, Some(id));
 }
 
 /// Página inicial: ninguna app visible.
@@ -241,6 +264,7 @@ fn add_service(
             group: services::normalize_group(group),
             adblock,
             enabled: true,
+            dnd: Dnd::default(),
         };
         list.push(service.clone());
         service
@@ -297,6 +321,44 @@ fn update_service(
         });
     }
     Ok(())
+}
+
+/// Cambia el no molestar de una app y lo aplica enseguida.
+fn change_dnd(app: &AppHandle, id: &str, change: impl FnOnce(&mut Dnd)) -> Result<(), String> {
+    {
+        let state = app.state::<AppState>();
+        let mut list = state.services.lock().unwrap();
+        let service = list
+            .iter_mut()
+            .find(|s| s.id == id)
+            .ok_or("error.unknownService")?;
+        change(&mut service.dnd);
+    }
+    services_changed(app);
+    dnd::refresh(app);
+    Ok(())
+}
+
+#[tauri::command]
+fn set_dnd_schedules(
+    app: AppHandle,
+    id: String,
+    schedules: Vec<DndSchedule>,
+) -> Result<(), String> {
+    change_dnd(&app, &id, |dnd| {
+        dnd.schedules = Dnd::clean_schedules(schedules)
+    })
+}
+
+/// Silencia la app a mano hasta `until` (segundos Unix); `None` lo quita.
+#[tauri::command]
+fn silence_service(app: AppHandle, id: String, until: Option<i64>) -> Result<(), String> {
+    change_dnd(&app, &id, |dnd| dnd.until = until)
+}
+
+#[tauri::command]
+fn dnd_active(state: tauri::State<'_, AppState>) -> Vec<String> {
+    state.dnd.lock().unwrap().iter().cloned().collect()
 }
 
 #[tauri::command]
@@ -567,7 +629,13 @@ pub fn run() {
                 zoom: Mutex::new(1.0),
                 home_pane_visible: AtomicBool::new(false),
                 update: Mutex::default(),
+                dnd: Mutex::default(),
+                layout: LayoutQueue::default(),
             });
+            layout_worker(app.handle());
+            #[cfg(target_os = "linux")]
+            display::guard_focus(data_dir.join("focus.log"));
+            dnd::watch(app.handle());
 
             let window = WindowBuilder::new(app, "main")
                 .title("Pulpo")
@@ -587,6 +655,11 @@ pub fn run() {
                 .on_page_load(|webview, _| {
                     let _ = webview.set_zoom(current_zoom(webview.app_handle()));
                 });
+            #[cfg(target_os = "linux")]
+            let shell = match platform::compose_script() {
+                Some(script) => shell.initialization_script(script),
+                None => shell,
+            };
             // En desarrollo, la consola de la barra lateral sale por la terminal.
             #[cfg(all(debug_assertions, target_os = "linux"))]
             let shell = {
@@ -654,6 +727,9 @@ pub fn run() {
             set_home_pane_visible,
             get_home_pane_size,
             set_home_pane_size,
+            set_dnd_schedules,
+            silence_service,
+            dnd_active,
             check_update,
             install_update,
         ])
@@ -850,6 +926,7 @@ fn open_service(
             // añade un paso por cada petición.
             .disable_drag_drop_handler()
             .initialization_script(shortcuts::script())
+            .initialization_script(dnd::SCRIPT)
             .on_document_title_changed(move |webview: Webview, title| {
                 if let Some(shortcut) = shortcuts::parse(&title) {
                     // Este aviso llega en el hilo de UI del motor web, y `layout` espera
@@ -870,6 +947,9 @@ fn open_service(
                 );
             })
             .on_page_load(move |webview, payload| {
+                // El estado de no molestar vive en la página: se repone en cada carga.
+                let app = webview.app_handle();
+                dnd::apply(app, webview.label(), dnd::is_active(app, webview.label()));
                 // Chromium guarda el zoom por dominio: al cambiar de página vuelve al
                 // que tuviera ese dominio, así que se repone.
                 let _ = webview.set_zoom(current_zoom(webview.app_handle()));
@@ -901,6 +981,10 @@ fn open_service(
     #[cfg(windows)]
     {
         builder = builder.additional_browser_args(&spellcheck::webview2_args());
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(script) = platform::compose_script() {
+        builder = builder.initialization_script_for_all_frames(script);
     }
     if let Some(ua) = diag::user_agent() {
         builder = builder.user_agent(&ua);
@@ -996,10 +1080,47 @@ fn placement(app: &AppHandle, id: &str) -> Placement {
     Placement::Hidden
 }
 
+/// Pide recolocar la barra lateral y los servicios (ver `LayoutQueue`). No
+/// espera: los pedidos seguidos se juntan en una sola pasada con el estado más
+/// reciente.
+fn layout(app: &AppHandle) {
+    request_layout(app, None);
+}
+
+/// Como `layout`, y después le da el foco al webview `focus`.
+fn request_layout(app: &AppHandle, focus: Option<String>) {
+    let queue = &app.state::<AppState>().layout;
+    let mut request = queue.request.lock().unwrap();
+    request.pending = true;
+    if focus.is_some() {
+        request.focus = focus;
+    }
+    queue.wake.notify_one();
+}
+
+fn layout_worker(app: &AppHandle) {
+    let app = app.clone();
+    std::thread::spawn(move || loop {
+        let focus = {
+            let queue = &app.state::<AppState>().layout;
+            let mut request = queue.request.lock().unwrap();
+            while !request.pending {
+                request = queue.wake.wait(request).unwrap();
+            }
+            request.pending = false;
+            request.focus.take()
+        };
+        apply_layout(&app);
+        if let Some(webview) = focus.and_then(|id| app.get_webview(&id)) {
+            let _ = webview.set_focus();
+        }
+    });
+}
+
 /// Coloca la barra lateral y los servicios según el tamaño de la ventana: la
 /// app activa a pantalla completa, la de la página inicial en su parte de
-/// abajo, y el resto ocultas.
-fn layout(app: &AppHandle) {
+/// abajo, y el resto ocultas. Solo desde `layout_worker`.
+fn apply_layout(app: &AppHandle) {
     let Some(window) = app.get_window("main") else {
         return;
     };

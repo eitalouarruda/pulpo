@@ -70,10 +70,6 @@
           <span data-i18n="manage.homeApp"></span>
           <div id="home-app" class="segmented wrap" role="radiogroup"></div>
         </div>
-        <div class="zoom-row" id="home-pane-row">
-          <span data-i18n="manage.homePaneSize"></span>
-          <div id="home-pane-size" class="segmented" role="radiogroup"></div>
-        </div>
         <div class="zoom-row">
           <span data-i18n="manage.language"></span>
           <!-- Botones y no <select>: su lista nativa se cierra sola dentro del webview. -->
@@ -114,6 +110,12 @@
             <small data-i18n="form.adblockHint"></small>
           </span>
         </label>
+        <div class="field">
+          <span class="field-label" data-i18n="dnd.title"></span>
+          <div id="f-dnd-list"></div>
+          <button type="button" class="ghost-btn dnd-add" id="f-dnd-add" data-i18n="dnd.add"></button>
+          <small class="dnd-hint" data-i18n="dnd.hint"></small>
+        </div>
         <p id="f-error" class="error" role="alert"></p>
         <footer>
           <button type="button" class="ghost" data-close data-i18n="action.cancel"></button>

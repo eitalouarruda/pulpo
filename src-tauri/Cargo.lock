@@ -3915,6 +3915,8 @@ version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
  "blocker",
+ "chrono",
+ "libloading 0.8.9",
  "serde",
  "serde_json",
  "tauri",
