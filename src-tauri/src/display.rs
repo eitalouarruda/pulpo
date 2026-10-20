@@ -1,4 +1,5 @@
-//! Ajustes de la interfaz: tamaño por pantalla y app de la página inicial.
+//! Ajustes de la interfaz: tamaño por pantalla, app de la página inicial y
+//! reglas de enlaces (`links`).
 //!
 //! Tamaño de la interfaz por pantalla.
 //!
@@ -34,6 +35,9 @@ pub struct Settings {
     /// Altura de esa app, como parte de la ventana (sin valor: la mitad).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub home_pane: Option<f64>,
+    /// Enlaces que se abren en una app en vez de en el navegador.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub links: Vec<crate::links::LinkRule>,
 }
 
 impl Settings {

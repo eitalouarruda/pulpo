@@ -2,6 +2,7 @@ mod diag;
 mod display;
 mod dnd;
 mod icons;
+mod links;
 mod platform;
 mod popups;
 mod services;
@@ -22,7 +23,8 @@ use tauri::webview::PageLoadEvent;
 use tauri::webview::{NewWindowResponse, WebviewBuilder};
 use tauri::window::WindowBuilder;
 use tauri::{
-    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Webview, WebviewUrl, WindowEvent,
+    AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Url, Webview, WebviewUrl,
+    WindowEvent,
 };
 use tauri_plugin_opener::OpenerExt;
 
@@ -380,8 +382,14 @@ fn remove_service(app: AppHandle, id: String) -> Result<(), String> {
     let app = app.clone();
     {
         let mut settings = state.settings.lock().unwrap();
-        if settings.home_app.as_deref() == Some(id.as_str()) {
-            settings.home_app = None;
+        let links = settings.links.len();
+        settings
+            .links
+            .retain(|r| r.app.as_deref() != Some(id.as_str()));
+        if settings.home_app.as_deref() == Some(id.as_str()) || settings.links.len() != links {
+            if settings.home_app.as_deref() == Some(id.as_str()) {
+                settings.home_app = None;
+            }
             let _ = display::save(&state.settings_path, &settings);
         }
     }
@@ -478,6 +486,26 @@ fn set_home_app(app: AppHandle, id: Option<String>) {
     }
     let _ = app.emit_to("shell", "home-app-changed", id);
     layout(&app);
+}
+
+#[tauri::command]
+fn get_link_rules(state: tauri::State<'_, AppState>) -> Vec<links::LinkRule> {
+    state.settings.lock().unwrap().links.clone()
+}
+
+/// Guarda las reglas de enlaces (en orden: gana la primera que cubre el enlace).
+#[tauri::command]
+fn set_link_rules(app: AppHandle, rules: Vec<links::LinkRule>) -> Vec<links::LinkRule> {
+    let state = app.state::<AppState>();
+    let mut settings = state.settings.lock().unwrap();
+    settings.links = links::normalize(rules);
+    if let Err(e) = display::save(&state.settings_path, &settings) {
+        eprintln!(
+            "[pulpo] no se pudo guardar {}: {e}",
+            state.settings_path.display()
+        );
+    }
+    settings.links.clone()
 }
 
 /// Altura de la app de la página inicial, como parte de la ventana.
@@ -599,7 +627,14 @@ pub fn run() {
     #[cfg(windows)]
     let builder = builder.runtime(tauri_runtime_wry::Wry::default());
     builder
-        .plugin(tauri_plugin_opener::init())
+        // Sin su script de enlaces: cancela los clics en `target="_blank"` y pide
+        // abrirlos por IPC, que las apps remotas no tienen, así que no se abría
+        // nada. Esos enlaces pasan por `on_new_window` (ver `open_service`).
+        .plugin(
+            tauri_plugin_opener::Builder::new()
+                .open_js_links_on_click(false)
+                .build(),
+        )
         .setup(|app| {
             let data_dir = app.path().app_data_dir()?;
             let config_path = services::config_path(&data_dir);
@@ -727,6 +762,8 @@ pub fn run() {
             set_home_pane_visible,
             get_home_pane_size,
             set_home_pane_size,
+            get_link_rules,
+            set_link_rules,
             set_dnd_schedules,
             silence_service,
             dnd_active,
@@ -968,13 +1005,28 @@ fn open_service(
             })
             .on_new_window({
                 let app = app.clone();
-                move |url, features| match popups::target(&url, features.size().is_some()) {
-                    // Logins y ventanas emergentes: dentro de Pulpo, con la sesión del
-                    // servicio y ligadas a la página que las abrió.
-                    popups::Target::InApp => NewWindowResponse::Allow,
-                    popups::Target::Browser => {
-                        let _ = app.opener().open_url(url.as_str(), None::<&str>);
-                        NewWindowResponse::Deny
+                move |url, features| {
+                    // Las reglas del usuario mandan, salvo en los logins: esos necesitan
+                    // volver a la página que los abrió.
+                    if !popups::is_login(&url) {
+                        let rule = links::route(
+                            &app.state::<AppState>().settings.lock().unwrap().links,
+                            &url,
+                        )
+                        .cloned();
+                        if let Some(rule) = rule {
+                            open_link(&app, url, rule.app);
+                            return NewWindowResponse::Deny;
+                        }
+                    }
+                    match popups::target(&url, features.size().is_some()) {
+                        // Logins y ventanas emergentes: dentro de Pulpo, con la sesión del
+                        // servicio y ligadas a la página que las abrió.
+                        popups::Target::InApp => NewWindowResponse::Allow,
+                        popups::Target::Browser => {
+                            open_link(&app, url, None);
+                            NewWindowResponse::Deny
+                        }
                     }
                 }
             });
@@ -985,6 +1037,10 @@ fn open_service(
     #[cfg(target_os = "linux")]
     if let Some(script) = platform::compose_script() {
         builder = builder.initialization_script_for_all_frames(script);
+    }
+    #[cfg(target_os = "linux")]
+    {
+        builder = builder.initialization_script_for_all_frames(links::SCRIPT);
     }
     if let Some(ua) = diag::user_agent() {
         builder = builder.user_agent(&ua);
@@ -1018,6 +1074,39 @@ fn open_service(
         webview.with_webview(move |platform| platform::attach(platform, blocker, &url))?;
     }
     Ok(())
+}
+
+/// Abre un enlace en la app `id`, o en el navegador del sistema si no hay app
+/// (o ya no existe, está desactivada o aún no se abrió). Se llama desde el hilo
+/// de UI del motor web: lo que toca el layout va en otro hilo.
+fn open_link(app: &AppHandle, url: Url, id: Option<String>) {
+    let service = id.and_then(|id| {
+        app.state::<AppState>()
+            .services
+            .lock()
+            .unwrap()
+            .iter()
+            .find(|s| s.id == id && s.enabled)
+            .cloned()
+    });
+    let webview = service
+        .as_ref()
+        .and_then(|s| app.get_webview(&s.id).map(|w| (s, w)));
+    let Some((service, webview)) = webview else {
+        let _ = app.opener().open_url(url.as_str(), None::<&str>);
+        return;
+    };
+    let url = links::for_app(&url, &service.url);
+    let app = app.clone();
+    let id = service.id.clone();
+    std::thread::spawn(move || {
+        if let Err(e) = webview.navigate(url) {
+            eprintln!("[pulpo] no se pudo abrir el enlace en {id}: {e}");
+            return;
+        }
+        // La barra lateral la selecciona (conoce el historial y los diálogos).
+        let _ = app.emit_to("shell", "show-app", id);
+    });
 }
 
 /// Atajo pulsado dentro de la app `id`. La barra lateral decide a cuál ir

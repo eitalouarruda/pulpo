@@ -49,11 +49,17 @@ const AUTH_SUFFIXES: &[&str] = &[".auth0.com", ".okta.com", ".onelogin.com", ".b
 /// "width=…,height=…")`), lo típico de una ventana emergente de login o de
 /// pago, no de un enlace.
 pub fn target(url: &Url, sized: bool) -> Target {
-    if sized || url.as_str() == "about:blank" || is_auth(url) {
+    if sized || is_login(url) {
         Target::InApp
     } else {
         Target::Browser
     }
+}
+
+/// Ventana que tiene que quedar ligada a la página que la abrió: un login, o
+/// una en blanco que la página llenará después.
+pub fn is_login(url: &Url) -> bool {
+    url.as_str() == "about:blank" || is_auth(url)
 }
 
 fn is_auth(url: &Url) -> bool {

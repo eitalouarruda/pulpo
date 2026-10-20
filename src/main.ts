@@ -475,6 +475,7 @@ function setHomeApp(id: string | null) {
 
 function renderManage() {
   renderHomeAppChoice();
+  renderLinks();
   const list = $("#manage-list");
   list.replaceChildren(
     ...services.map((s) => {
@@ -678,7 +679,121 @@ $("#d-enable").addEventListener("click", () => {
 $("#manage").addEventListener("click", () => {
   renderManage();
   openOverlay("manage");
+  invoke<LinkRule[]>("get_link_rules")
+    .then((rules) => {
+      linkRules = rules;
+      renderLinks();
+    })
+    .catch(console.error);
 });
+
+// ---------------------------------------------------------------- enlaces
+
+/// Espejo de `links::LinkRule`. `app` sin valor: el navegador del sistema.
+interface LinkRule {
+  pattern: string;
+  app: string | null;
+}
+
+let linkRules: LinkRule[] = [];
+const linksMenu = $("#links-menu");
+
+/// Se guarda tal cual; Rust descarta las vacías al guardar, pero aquí se
+/// quedan mientras se escriben.
+const saveLinks = () => invoke("set_link_rules", { rules: linkRules }).catch(console.error);
+
+const linkAppName = (id: string | null) =>
+  (id && services.find((s) => s.id === id)?.name) || t("links.browser");
+
+function renderLinks() {
+  closeLinksMenu();
+  $("#links-list").replaceChildren(
+    ...linkRules.map((rule, i) => {
+      const row = document.createElement("div");
+      row.className = "link-row";
+      const input = document.createElement("input");
+      input.type = "text";
+      input.spellcheck = false;
+      input.placeholder = t("links.placeholder");
+      input.value = rule.pattern;
+      input.addEventListener("input", () => (rule.pattern = input.value));
+      input.addEventListener("change", saveLinks);
+      const arrow = document.createElement("span");
+      arrow.textContent = "→";
+      const dest = document.createElement("button");
+      dest.type = "button";
+      dest.className = "ghost-btn link-dest";
+      dest.textContent = linkAppName(rule.app);
+      dest.addEventListener("click", () => openLinksMenu(dest, rule));
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "ghost-btn icon-btn";
+      remove.textContent = "×";
+      remove.title = t("links.remove");
+      remove.addEventListener("click", () => {
+        linkRules.splice(i, 1);
+        renderLinks();
+        saveLinks();
+      });
+      row.append(input, arrow, dest, remove);
+      return row;
+    }),
+  );
+}
+
+function openLinksMenu(anchor: HTMLElement, rule: LinkRule) {
+  const item = (id: string | null) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.role = "menuitemradio";
+    b.setAttribute("aria-checked", String(id === rule.app));
+    b.innerHTML = `<span class="mark"></span><span></span>`;
+    b.lastElementChild!.textContent = linkAppName(id);
+    b.addEventListener("click", () => {
+      rule.app = id;
+      anchor.textContent = linkAppName(id);
+      closeLinksMenu();
+      saveLinks();
+    });
+    return b;
+  };
+  linksMenu.replaceChildren(
+    item(null),
+    document.createElement("hr"),
+    ...services.filter((s) => s.enabled).map((s) => item(s.id)),
+  );
+  linksMenu.hidden = false;
+  const r = anchor.getBoundingClientRect();
+  linksMenu.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - linksMenu.offsetWidth - 8))}px`;
+  // Debajo del botón, o encima si no cabe.
+  const below = r.bottom + 4;
+  linksMenu.style.top = `${below + linksMenu.offsetHeight > window.innerHeight - 8 ? Math.max(8, r.top - linksMenu.offsetHeight - 4) : below}px`;
+}
+
+function closeLinksMenu() {
+  linksMenu.hidden = true;
+}
+
+$("#links-add").addEventListener("click", () => {
+  linkRules.push({ pattern: "", app: null });
+  renderLinks();
+  $<HTMLInputElement>("#links-list .link-row:last-child input").focus();
+});
+document.addEventListener("pointerdown", (e) => {
+  const target = e.target as HTMLElement;
+  if (!linksMenu.hidden && !linksMenu.contains(target) && !target.closest(".link-dest")) closeLinksMenu();
+});
+// Esc con la lista abierta solo la cierra a ella, no el diálogo.
+window.addEventListener(
+  "keydown",
+  (e) => {
+    if (e.key === "Escape" && !linksMenu.hidden) {
+      e.stopImmediatePropagation();
+      closeLinksMenu();
+    }
+  },
+  true,
+);
 
 /// Icono elegido en el formulario (se aplica al guardar).
 let iconChoice: { source: IconSource; icon: string | null } = { source: "web", icon: null };
@@ -1256,12 +1371,16 @@ await listen<Shortcut>("shortcut", ({ payload }) => {
   else selectIndex(payload.n);
 });
 // Clic en una notificación de una app: Pulpo ya está al frente, falta abrirla.
-await listen<string>("notification-clicked", ({ payload: id }) => {
+/// Lleva a una app desde Rust: clic en una notificación suya o un enlace que
+/// abre una regla en ella.
+const showApp = ({ payload: id }: { payload: string }) => {
   if (!services.some((s) => s.id === id)) return;
   returnTo = null;
   if (!overlay.hidden && !isBase(currentView())) closeOverlay();
   select(id);
-});
+};
+await listen<string>("notification-clicked", showApp);
+await listen<string>("show-app", showApp);
 await listen<string>("edit-service", ({ payload: id }) => {
   const s = services.find((s) => s.id === id);
   if (s) openForm(s, s.id);
