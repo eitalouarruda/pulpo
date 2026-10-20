@@ -4,7 +4,7 @@
 
 use std::sync::mpsc;
 use std::sync::{Arc, Mutex};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use blocker::Blocker;
 use tauri::Webview;
@@ -194,6 +194,65 @@ mod task {
     pub fn post_send(browser: Browser, message: String) {
         let mut task = SendDevToolsTask::new(browser, message);
         post_task(sys::cef_thread_id_t::TID_UI.into(), Some(&mut task));
+    }
+}
+
+/// Escribe ya en disco las cookies de cada webview y espera (como mucho
+/// `timeout`) a que termine. Chromium las guarda por lotes cada ~30 s, y al
+/// salir para actualizar, que suele pasar a los pocos segundos de arrancar, se
+/// perdían las que la página acababa de renovar al cargar (YouTube y Trello
+/// rotan las de sesión): la versión nueva mandaba las viejas y el sitio cerraba
+/// la sesión. No se llama desde el hilo principal.
+pub fn flush_cookies(webviews: &[Webview], timeout: Duration) {
+    let (tx, rx) = mpsc::channel();
+    let mut pending = 0;
+    for webview in webviews {
+        let tx = tx.clone();
+        let posted = webview.with_cef_webview(move |handle| flush::start(handle.browser(), tx));
+        if posted.is_ok() {
+            pending += 1;
+        }
+    }
+    let deadline = Instant::now() + timeout;
+    while pending > 0 {
+        let left = deadline.saturating_duration_since(Instant::now());
+        if rx.recv_timeout(left).is_err() {
+            eprintln!("[pulpo] cookies: {pending} perfiles sin confirmar el guardado");
+            return;
+        }
+        pending -= 1;
+    }
+}
+
+mod flush {
+    use std::sync::mpsc::Sender;
+    use tauri_runtime_cef::cef::*;
+
+    /// Pide el guardado; `tx` recibe el aviso al terminar (o ya, si no se pudo).
+    pub fn start(browser: Browser, tx: Sender<()>) {
+        let manager = browser
+            .host()
+            .and_then(|host| host.request_context())
+            .and_then(|context| context.cookie_manager(None));
+        let flushing = manager.is_some_and(|manager| {
+            let mut done = Done::new(tx.clone());
+            manager.flush_store(Some(&mut done)) != 0
+        });
+        if !flushing {
+            let _ = tx.send(());
+        }
+    }
+
+    wrap_completion_callback! {
+        pub struct Done {
+            tx: Sender<()>,
+        }
+
+        impl CompletionCallback {
+            fn on_complete(&self) {
+                let _ = self.tx.send(());
+            }
+        }
     }
 }
 

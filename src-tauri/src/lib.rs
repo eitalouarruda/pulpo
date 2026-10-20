@@ -573,6 +573,17 @@ async fn install_update(app: AppHandle) -> Result<(), String> {
     })
     .await
     .map_err(|e| e.to_string())??;
+    // Que la versión nueva encuentre las cookies que las páginas acaban de
+    // renovar (ver `platform::flush_cookies`).
+    #[cfg(target_os = "linux")]
+    {
+        let webviews: Vec<_> = app.webviews().into_values().collect();
+        tauri::async_runtime::spawn_blocking(move || {
+            platform::flush_cookies(&webviews, Duration::from_secs(5))
+        })
+        .await
+        .map_err(|e| e.to_string())?;
+    }
     app.exit(0);
     Ok(())
 }
