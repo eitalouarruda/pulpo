@@ -38,6 +38,9 @@ pub struct Settings {
     /// Enlaces que se abren en una app en vez de en el navegador.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub links: Vec<crate::links::LinkRule>,
+    /// Cuentas de GitHub y repos vigilados en la vista CI (los tokens van al llavero).
+    #[serde(default, skip_serializing_if = "crate::ci::CiSettings::is_empty")]
+    pub ci: crate::ci::CiSettings,
 }
 
 impl Settings {

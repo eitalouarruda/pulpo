@@ -13,6 +13,10 @@
       </button>
       <nav id="services" data-i18n-label="sidebar.services"></nav>
       <button id="add" type="button" data-i18n-title="sidebar.add" data-i18n-label="sidebar.add">+</button>
+      <button id="ci" type="button" hidden data-i18n-title="sidebar.ci" data-i18n-label="sidebar.ci">
+        <span class="ci-label">CI</span>
+        <span class="badge"></span>
+      </button>
       <button id="manage" type="button" data-i18n-title="sidebar.manage" data-i18n-label="sidebar.manage">
         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
           <path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3h-4l-.3 2.9a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.4 7.4 0 0 0 1.7 1L11 21h4l.3-2.9a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/>
@@ -66,6 +70,13 @@
           <button type="button" class="ghost-btn" id="zoom-auto" data-i18n-title="zoom.reset" data-i18n="zoom.auto"></button>
         </div>
         <ul id="manage-list"></ul>
+        <label class="check">
+          <input id="ci-enabled" type="checkbox" />
+          <span>
+            <span data-i18n="manage.ci"></span>
+            <small data-i18n="manage.ciHint"></small>
+          </span>
+        </label>
         <div class="zoom-row home-app-row">
           <span data-i18n="manage.homeApp"></span>
           <div id="home-app" class="segmented wrap" role="radiogroup"></div>
@@ -88,6 +99,31 @@
         <p class="hint" data-i18n="manage.hint"></p>
       </section>
 
+      <section class="card" id="ci-view" hidden>
+        <header>
+          <h2 data-i18n="ci.title"></h2>
+          <button type="button" class="ghost-btn" id="ci-setup-toggle" data-i18n="ci.setup"></button>
+          <button type="button" class="ghost-btn" data-close data-i18n="manage.close"></button>
+        </header>
+        <ul id="ci-runs"></ul>
+        <p id="ci-empty" class="hint"></p>
+        <div id="ci-setup" class="links-box" hidden>
+          <div class="links-head"><span data-i18n="ci.accounts"></span></div>
+          <div id="ci-accounts"></div>
+          <form id="ci-token-form" class="link-row" autocomplete="off">
+            <input id="ci-token" type="password" data-i18n-placeholder="ci.tokenPlaceholder" />
+            <button type="submit" class="ghost-btn" data-i18n="ci.addToken"></button>
+          </form>
+          <small class="hint" data-i18n-html="ci.tokenHint"></small>
+          <p id="ci-error" class="error" role="alert"></p>
+          <div class="links-head">
+            <span data-i18n="ci.repos"></span>
+            <input id="ci-repo-search" type="search" data-i18n-placeholder="ci.repoSearch" autocomplete="off" />
+          </div>
+          <div id="ci-repos"></div>
+        </div>
+      </section>
+
       <form class="card" id="form-view" hidden autocomplete="off">
         <h2 id="form-title"></h2>
         <label>
@@ -98,10 +134,11 @@
           <span data-i18n="form.url"></span>
           <input id="f-url" type="text" placeholder="https://…" required />
         </label>
-        <label>
+        <label class="suggest-field">
           <span data-i18n="form.group"></span>
-          <input id="f-group" type="text" list="groups" data-i18n-placeholder="form.groupPlaceholder" />
-          <datalist id="groups"></datalist>
+          <input id="f-group" type="text" data-i18n-placeholder="form.groupPlaceholder" />
+          <!-- Sin <datalist>: su lista nativa se cierra sola dentro del webview. -->
+          <div class="suggest" id="groups" role="listbox" hidden></div>
         </label>
         <div class="field">
           <span class="field-label" data-i18n="form.icon"></span>

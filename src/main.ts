@@ -60,6 +60,7 @@ const views = {
   confirm: $("#confirm-view"),
   switcher: $("#switcher-view"),
   update: $("#update-view"),
+  ci: $("#ci-view"),
 };
 const form = {
   title: $("#form-title"),
@@ -67,7 +68,7 @@ const form = {
   url: $<HTMLInputElement>("#f-url"),
   adblock: $<HTMLInputElement>("#f-adblock"),
   group: $<HTMLInputElement>("#f-group"),
-  groups: $<HTMLDataListElement>("#groups"),
+  groups: $("#groups"),
   iconPreview: $("#f-icon"),
   iconFile: $<HTMLInputElement>("#f-icon-file"),
   error: $("#f-error"),
@@ -810,6 +811,74 @@ interface FormInit {
   dnd?: Dnd;
 }
 
+// Sugerencias del campo de grupo: los grupos que ya existen y contienen lo escrito.
+let groupIndex = -1;
+
+function groupSuggestions(): string[] {
+  const typed = form.group.value.trim().toLowerCase();
+  const all = [...new Set(services.map((s) => s.group).filter((g): g is string => !!g))];
+  return all.filter((g) => g.toLowerCase().includes(typed) && g.toLowerCase() !== typed);
+}
+
+function renderGroupSuggestions() {
+  const list = groupSuggestions();
+  groupIndex = Math.min(groupIndex, list.length - 1);
+  form.groups.hidden = list.length === 0;
+  form.groups.replaceChildren(
+    ...list.map((g, i) => {
+      const item = document.createElement("div");
+      item.role = "option";
+      item.textContent = g;
+      item.setAttribute("aria-selected", String(i === groupIndex));
+      // mousedown y no click: así el campo no pierde el foco antes de elegir.
+      item.addEventListener("mousedown", (e) => {
+        e.preventDefault();
+        pickGroup(g);
+      });
+      item.addEventListener("mousemove", () => {
+        if (groupIndex === i) return;
+        groupIndex = i;
+        renderGroupSuggestions();
+      });
+      return item;
+    }),
+  );
+}
+
+function pickGroup(group: string) {
+  form.group.value = group;
+  groupIndex = -1;
+  form.groups.hidden = true;
+}
+
+form.group.addEventListener("focus", () => {
+  groupIndex = -1;
+  renderGroupSuggestions();
+});
+form.group.addEventListener("input", () => {
+  groupIndex = -1;
+  renderGroupSuggestions();
+});
+form.group.addEventListener("blur", () => (form.groups.hidden = true));
+form.group.addEventListener("keydown", (e) => {
+  if (form.groups.hidden) return;
+  const list = groupSuggestions();
+  if (e.key === "ArrowDown" || e.key === "ArrowUp") {
+    e.preventDefault();
+    const step = e.key === "ArrowDown" ? 1 : -1;
+    groupIndex = (groupIndex + step + list.length + 1) % (list.length + 1);
+    if (groupIndex === list.length) groupIndex = -1;
+    renderGroupSuggestions();
+  } else if (e.key === "Enter" && groupIndex >= 0) {
+    e.preventDefault();
+    pickGroup(list[groupIndex]);
+  } else if (e.key === "Escape") {
+    // Cierra solo la lista, no el formulario.
+    e.stopPropagation();
+    form.groups.hidden = true;
+  }
+});
+
 function openForm(init: FormInit, edit: string | null) {
   editing = edit;
   form.title.textContent = t(edit ? "form.edit" : "form.new");
@@ -818,11 +887,7 @@ function openForm(init: FormInit, edit: string | null) {
   form.url.value = init.url;
   form.adblock.checked = init.adblock;
   form.group.value = init.group ?? "";
-  form.groups.replaceChildren(
-    ...[...new Set(services.map((s) => s.group).filter(Boolean))].map((g) =>
-      Object.assign(document.createElement("option"), { value: g! }),
-    ),
-  );
+  form.groups.hidden = true;
   formColor = init.color ?? "#8e4ec6";
   formSchedules = structuredClone(init.dnd?.schedules ?? []);
   renderSchedules();
@@ -1304,6 +1369,10 @@ function changeLanguage(lang: Language) {
   // Los textos que se pintan desde aquí se rehacen con el idioma nuevo.
   renderSidebar();
   renderManage();
+  renderCi();
+  renderCiAccounts();
+  renderCiRepos();
+  $("#ci-setup-toggle").textContent = t(ci.setup.hidden ? "ci.setup" : "ci.setupDone");
   const base = baseView();
   if (base) renderBase(base);
   showStatus(lastStatus);
@@ -1440,6 +1509,310 @@ window.addEventListener("keyup", (e) => {
 window.addEventListener("blur", () => (ctrlAlone = false));
 
 $("#home").addEventListener("click", goHome);
+
+// ---------------------------------------------------------------- CI
+
+/// Un run de GitHub Actions (como `ci::Run`).
+interface CiRun {
+  id: number;
+  repo: string;
+  workflow: string;
+  branch: string | null;
+  title: string;
+  status: string;
+  conclusion: string | null;
+  url: string;
+  started_at: string | null;
+  updated_at: string | null;
+}
+
+interface CiAccount {
+  login: string;
+  valid: boolean;
+}
+
+interface CiRepo {
+  repo: string;
+  account: string;
+  private: boolean;
+  watched: boolean;
+}
+
+const ci = {
+  button: $("#ci"),
+  runs: $("#ci-runs"),
+  empty: $("#ci-empty"),
+  setup: $("#ci-setup"),
+  accounts: $("#ci-accounts"),
+  tokenForm: $<HTMLFormElement>("#ci-token-form"),
+  token: $<HTMLInputElement>("#ci-token"),
+  error: $("#ci-error"),
+  repoSearch: $<HTMLInputElement>("#ci-repo-search"),
+  repos: $("#ci-repos"),
+};
+let ciRuns: CiRun[] = [];
+let ciAccounts: CiAccount[] = [];
+/// Repos a los que llegan los tokens (null: sin cargar todavía).
+let ciRepos: CiRepo[] | null = null;
+let ciReposLoading = false;
+
+type CiState = "running" | "pending" | "ok" | "fail" | "off";
+
+function ciState(r: CiRun): CiState {
+  if (r.status === "in_progress") return "running";
+  if (r.status !== "completed") return "pending";
+  if (r.conclusion === "success") return "ok";
+  if (["failure", "timed_out", "startup_failure", "action_required"].includes(r.conclusion ?? "")) {
+    return "fail";
+  }
+  return "off";
+}
+
+function ciStatusText(r: CiRun): string {
+  if (r.status === "in_progress" || r.status === "waiting") return t(`ci.state.${r.status}`);
+  if (r.status !== "completed") return t("ci.state.queued");
+  const state = ciState(r);
+  if (state === "ok") return t("ci.state.success");
+  if (state === "fail") return t("ci.state.failure");
+  return r.conclusion === "cancelled" ? t("ci.state.cancelled") : t("ci.state.other");
+}
+
+/// Tiempo del run: hasta ahora si sigue, hasta su última actualización si acabó.
+function ciDuration(r: CiRun): string {
+  if (!r.started_at) return "";
+  const start = Date.parse(r.started_at);
+  const end = r.status === "completed" && r.updated_at ? Date.parse(r.updated_at) : Date.now();
+  const secs = Math.max(0, Math.round((end - start) / 1000));
+  if (secs < 60) return `${secs} s`;
+  const mins = Math.floor(secs / 60);
+  if (mins < 60) return `${mins} min ${String(secs % 60).padStart(2, "0")} s`;
+  return `${Math.floor(mins / 60)} h ${mins % 60} min`;
+}
+
+const repoName = (repo: string) => repo.split("/").pop() ?? repo;
+
+function renderCiButton() {
+  const active = ciRuns.filter((r) => r.status !== "completed").length;
+  ci.button.querySelector(".badge")!.textContent = active > 0 ? String(active) : "";
+  const finished = ciRuns.filter((r) => r.status === "completed").map(ciState);
+  ci.button.dataset.state = active
+    ? "running"
+    : finished.includes("fail")
+      ? "fail"
+      : finished.includes("ok")
+        ? "ok"
+        : "";
+}
+
+function renderCi() {
+  renderCiButton();
+  ci.runs.replaceChildren(
+    ...ciRuns.map((r) => {
+      const li = document.createElement("li");
+      li.classList.toggle("finished", r.status === "completed");
+      li.title = r.url;
+      const dot = document.createElement("span");
+      dot.className = "ci-dot";
+      const state = ciState(r);
+      dot.dataset.state = state;
+      dot.textContent = state === "ok" ? "✓" : state === "fail" ? "✕" : "";
+      const text = document.createElement("span");
+      text.className = "m-text";
+      const name = document.createElement("strong");
+      name.textContent = `${repoName(r.repo)} · ${r.workflow}`;
+      const detail = document.createElement("small");
+      detail.textContent = [r.branch, r.title].filter(Boolean).join(" · ");
+      text.append(name, detail);
+      const time = document.createElement("span");
+      time.className = "ci-time";
+      time.dataset.id = String(r.id);
+      time.append(ciStatusText(r));
+      const elapsed = document.createElement("small");
+      elapsed.textContent = ciDuration(r);
+      time.append(elapsed);
+      li.append(dot, text, time);
+      li.addEventListener("click", () => invoke("ci_open", { url: r.url }).catch(console.error));
+      return li;
+    }),
+  );
+  const watched = ciRepos ? ciRepos.some((r) => r.watched) : ciAccounts.length > 0;
+  ci.empty.textContent = ciRuns.length
+    ? ""
+    : !ciAccounts.length
+      ? t("ci.noAccounts")
+      : !watched
+        ? t("ci.noRepos")
+        : t("ci.empty");
+}
+
+/// Con la vista abierta, los tiempos de los runs en marcha avanzan solos.
+setInterval(() => {
+  if (overlay.hidden || currentView() !== "ci") return;
+  for (const r of ciRuns) {
+    if (r.status === "completed") continue;
+    const small = ci.runs.querySelector(`.ci-time[data-id="${r.id}"] small`);
+    if (small) small.textContent = ciDuration(r);
+  }
+}, 1000);
+
+function renderCiAccounts() {
+  ci.accounts.replaceChildren(
+    ...ciAccounts.map((a) => {
+      const row = document.createElement("div");
+      row.className = "ci-account";
+      const name = document.createElement("span");
+      name.textContent = a.login;
+      if (!a.valid) {
+        const warn = document.createElement("small");
+        warn.className = "warn";
+        warn.textContent = ` · ${t("ci.invalid")}`;
+        name.append(warn);
+      }
+      const remove = document.createElement("button");
+      remove.type = "button";
+      remove.className = "ghost-btn";
+      remove.textContent = t("ci.remove");
+      remove.addEventListener("click", () => {
+        invoke("ci_remove_account", { login: a.login })
+          .then(() => loadCiRepos())
+          .catch((e) => (ci.error.textContent = tError(e)));
+      });
+      row.append(name, remove);
+      return row;
+    }),
+  );
+}
+
+function renderCiRepos() {
+  if (ciReposLoading && !ciRepos) {
+    ci.repos.textContent = t("ci.reposLoading");
+    return;
+  }
+  const query = ci.repoSearch.value.trim().toLowerCase();
+  const repos = (ciRepos ?? []).filter((r) => r.repo.toLowerCase().includes(query));
+  if (!repos.length) {
+    ci.repos.textContent = ciAccounts.length ? t("ci.reposEmpty") : "";
+    return;
+  }
+  ci.repos.replaceChildren(
+    ...repos.map((r) => {
+      const label = document.createElement("label");
+      label.className = "check";
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.checked = r.watched;
+      box.addEventListener("change", () => {
+        r.watched = box.checked;
+        const repos = (ciRepos ?? [])
+          .filter((x) => x.watched)
+          .map(({ repo, account }) => ({ repo, account }));
+        invoke("ci_set_repos", { repos }).catch(console.error);
+        renderCi();
+      });
+      const name = document.createElement("span");
+      name.textContent = r.repo;
+      if (r.private) {
+        const small = document.createElement("small");
+        small.textContent = ` · ${t("ci.private")}`;
+        name.append(small);
+      }
+      label.append(box, name);
+      return label;
+    }),
+  );
+}
+
+function loadCiRepos() {
+  if (!ciAccounts.length) {
+    ciRepos = [];
+    renderCiRepos();
+    return;
+  }
+  ciReposLoading = true;
+  renderCiRepos();
+  invoke<CiRepo[]>("ci_list_repos")
+    .then((repos) => {
+      ciRepos = repos;
+      ci.error.textContent = "";
+    })
+    .catch((e) => (ci.error.textContent = tError(e)))
+    .finally(() => {
+      ciReposLoading = false;
+      renderCiRepos();
+      renderCi();
+    });
+}
+
+function showCiSetup(show: boolean) {
+  ci.setup.hidden = !show;
+  $("#ci-setup-toggle").textContent = t(show ? "ci.setupDone" : "ci.setup");
+  if (show) {
+    renderCiAccounts();
+    if (ciRepos === null) loadCiRepos();
+    else renderCiRepos();
+  }
+}
+
+ci.button.addEventListener("click", () => {
+  renderCi();
+  ci.error.textContent = "";
+  showCiSetup(!ciAccounts.length);
+  openOverlay("ci");
+});
+$("#ci-setup-toggle").addEventListener("click", () => showCiSetup(ci.setup.hidden));
+ci.repoSearch.addEventListener("input", renderCiRepos);
+ci.tokenForm.addEventListener("submit", (e) => {
+  e.preventDefault();
+  ci.error.textContent = "";
+  const token = ci.token.value;
+  invoke<string>("ci_add_token", { token })
+    .then(() => {
+      ci.token.value = "";
+      loadCiRepos();
+    })
+    .catch((err) => (ci.error.textContent = tError(err)));
+});
+// Enlaces de la ayuda: al navegador del sistema (la barra lateral no navega).
+overlay.addEventListener("click", (e) => {
+  const link = (e.target as HTMLElement).closest<HTMLAnchorElement>("a[data-external]");
+  if (!link) return;
+  e.preventDefault();
+  invoke("ci_open", { url: link.href }).catch(console.error);
+});
+
+const ciEnabledBox = $<HTMLInputElement>("#ci-enabled");
+function showCiEnabled(enabled: boolean) {
+  ci.button.hidden = !enabled;
+  ciEnabledBox.checked = enabled;
+}
+ciEnabledBox.addEventListener("change", () =>
+  invoke("ci_set_enabled", { enabled: ciEnabledBox.checked }).catch(console.error),
+);
+showCiEnabled(await invoke<boolean>("ci_enabled"));
+await listen<boolean>("ci-enabled", ({ payload }) => showCiEnabled(payload));
+
+ciAccounts = await invoke<CiAccount[]>("ci_accounts");
+ciRuns = await invoke<CiRun[]>("ci_runs");
+renderCi();
+await listen<CiRun[]>("ci-changed", ({ payload }) => {
+  ciRuns = payload;
+  renderCi();
+});
+await listen<CiAccount[]>("ci-accounts", ({ payload }) => {
+  ciAccounts = payload;
+  renderCiAccounts();
+  renderCi();
+});
+// Un run terminó: aviso del sistema (clic: el run en el navegador).
+await listen<CiRun>("ci-finished", ({ payload: r }) => {
+  const state = ciState(r);
+  const mark = state === "ok" ? "✓" : state === "fail" ? "✕" : "•";
+  invoke("ci_notify", {
+    summary: `${mark} ${repoName(r.repo)} · ${r.workflow}`,
+    body: [ciStatusText(r), r.branch, ciDuration(r)].filter(Boolean).join(" · "),
+    url: r.url,
+  }).catch(console.error);
+});
 
 // ---------------------------------------------------------------- tamaño
 

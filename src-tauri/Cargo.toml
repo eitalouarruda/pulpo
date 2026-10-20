@@ -32,6 +32,10 @@ ureq = "3"
 base64 = "0.22"
 # Hora local para los horarios de no molestar.
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+# Tokens de GitHub de la vista CI, en el llavero del sistema.
+keyring = "4"
+# Aviso al terminar un run de CI.
+notify-rust = "4"
 
 # Linux: Chromium (CEF). WebKitGTK es ~3 veces más lento navegando YouTube Music.
 [target.'cfg(target_os = "linux")'.dependencies]

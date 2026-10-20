@@ -242,6 +242,7 @@ form.card {
 }
 
 input[type="text"],
+input[type="password"],
 input[type="search"] {
   width: 100%;
   padding: 9px 11px;
@@ -254,6 +255,7 @@ input[type="search"] {
 }
 
 input[type="text"]:focus,
+input[type="password"]:focus,
 input[type="search"]:focus {
   border-color: var(--accent);
 }
@@ -609,6 +611,216 @@ label.check small {
 #manage:hover,
 #manage:focus-visible {
   color: var(--fg);
+}
+
+/* ------------------------------------------------------------ CI */
+
+#ci {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+#ci[hidden] {
+  display: none;
+}
+
+#ci:hover,
+#ci:focus-visible {
+  color: var(--fg);
+}
+
+.ci-label {
+  padding: 2px 6px;
+  border: 1.5px solid currentColor;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+#ci[data-state="running"] {
+  color: var(--warn);
+}
+
+#ci[data-state="fail"] {
+  color: var(--badge);
+}
+
+#ci[data-state="ok"] {
+  color: var(--ok);
+}
+
+#ci .badge {
+  position: absolute;
+  top: -7px;
+  right: -2px;
+  min-width: 16px;
+  height: 16px;
+  padding: 0 4px;
+  border-radius: 8px;
+  background: var(--warn);
+  color: #000;
+  font-size: 10px;
+  font-weight: 700;
+  line-height: 16px;
+}
+
+#ci .badge:empty {
+  display: none;
+}
+
+#ci-view {
+  overflow-y: auto;
+}
+
+#ci-view > * {
+  flex-shrink: 0;
+}
+
+#ci-runs {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+#ci-runs:empty {
+  display: none;
+}
+
+#ci-runs li {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--field);
+  cursor: pointer;
+}
+
+#ci-runs li:hover {
+  background: var(--line);
+}
+
+#ci-runs li.finished .m-text {
+  opacity: 0.75;
+}
+
+.ci-dot {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 20px;
+  height: 20px;
+  border-radius: 50%;
+  font-size: 12px;
+  font-weight: 700;
+  color: #000;
+}
+
+.ci-dot[data-state="running"] {
+  border: 2px solid var(--warn);
+  border-top-color: transparent;
+  animation: ci-spin 1s linear infinite;
+}
+
+.ci-dot[data-state="pending"] {
+  border: 2px dashed var(--muted);
+}
+
+.ci-dot[data-state="ok"] {
+  background: var(--ok);
+}
+
+.ci-dot[data-state="fail"] {
+  background: var(--badge);
+}
+
+.ci-dot[data-state="off"] {
+  background: var(--muted);
+}
+
+@keyframes ci-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.ci-time {
+  flex: none;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.ci-time small {
+  display: block;
+}
+
+#ci-empty:empty {
+  display: none;
+}
+
+#ci-accounts,
+#ci-repos {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+#ci-repos {
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+#ci-accounts:empty {
+  display: none;
+}
+
+.ci-account {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.ci-account > span {
+  flex: 1;
+}
+
+.ci-account .warn {
+  color: var(--badge);
+  font-size: 12px;
+}
+
+#ci-repos label.check {
+  align-items: center;
+  padding: 3px 2px;
+}
+
+#ci-repos small {
+  display: inline;
+  color: var(--muted);
+}
+
+#ci-repo-search {
+  width: 180px;
+  padding: 5px 8px;
+}
+
+#ci-setup .hint a {
+  color: var(--accent);
 }
 
 /* ------------------------------------------------------------ app desactivada */
@@ -1206,4 +1418,42 @@ body.split .home-hint {
   max-height: 60vh;
   overflow-y: auto;
   z-index: 10;
+}
+
+/* ------------------------------------------------------------ sugerencias (grupo) */
+
+.suggest-field {
+  position: relative;
+}
+
+.suggest {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  right: 0;
+  z-index: 10;
+  max-height: 180px;
+  margin-top: 4px;
+  padding: 4px;
+  overflow-y: auto;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--bg);
+  box-shadow: 0 10px 30px rgb(0 0 0 / 0.5);
+}
+
+.suggest[hidden] {
+  display: none;
+}
+
+.suggest div {
+  padding: 6px 8px;
+  border-radius: 6px;
+  color: var(--fg);
+  cursor: pointer;
+}
+
+.suggest div:hover,
+.suggest div[aria-selected="true"] {
+  background: var(--field);
 }

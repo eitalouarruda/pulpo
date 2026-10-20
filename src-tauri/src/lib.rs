@@ -1,3 +1,4 @@
+mod ci;
 mod diag;
 mod display;
 mod dnd;
@@ -682,6 +683,8 @@ pub fn run() {
             #[cfg(target_os = "linux")]
             display::guard_focus(data_dir.join("focus.log"));
             dnd::watch(app.handle());
+            app.manage(ci::Ci::default());
+            ci::watch(app.handle());
 
             let window = WindowBuilder::new(app, "main")
                 .title("Pulpo")
@@ -780,6 +783,16 @@ pub fn run() {
             dnd_active,
             check_update,
             install_update,
+            ci::ci_accounts,
+            ci::ci_runs,
+            ci::ci_add_token,
+            ci::ci_remove_account,
+            ci::ci_list_repos,
+            ci::ci_set_repos,
+            ci::ci_open,
+            ci::ci_notify,
+            ci::ci_enabled,
+            ci::ci_set_enabled,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
