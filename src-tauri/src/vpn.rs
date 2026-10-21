@@ -35,6 +35,7 @@ const MAX_HEAD: usize = 64 * 1024;
 
 /// WebRTC (llamadas) manda UDP directo y deja ver la IP real: con la VPN solo
 /// puede ir por el proxy. Las llamadas que necesiten UDP pueden no funcionar.
+#[cfg(target_os = "linux")]
 pub const WEBRTC_POLICY: &str = "disable_non_proxied_udp";
 #[cfg(windows)]
 pub const WEBRTC_ARG: &str = "--force-webrtc-ip-handling-policy=disable_non_proxied_udp";
