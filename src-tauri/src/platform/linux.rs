@@ -75,9 +75,14 @@ pub fn attach(
     blocker: Option<Arc<Blocker>>,
     url: &str,
     theme: Theme,
+    vpn: bool,
 ) -> tauri::Result<()> {
     if initial_load.recv_timeout(Duration::from_secs(10)).is_err() {
         eprintln!("[pulpo] {url}: la carga inicial no terminó; se navega igual");
+    }
+    if vpn {
+        // Antes de navegar: si no se puede, la app no se carga (la IP real se vería).
+        proxy_only_webrtc(webview)?;
     }
     if let Err(e) = set_theme(webview, theme) {
         eprintln!("[pulpo] {url}: no se pudo fijar el tema: {e}");
@@ -91,6 +96,35 @@ pub fn attach(
         }
     }
     webview.navigate(url.parse().expect("url del servicio"))
+}
+
+/// WebRTC solo por el proxy (ver `vpn::WEBRTC_POLICY`). Es una preferencia del
+/// perfil, que es solo de esta app.
+fn proxy_only_webrtc(webview: &Webview) -> tauri::Result<()> {
+    use cef::{ImplBrowser, ImplBrowserHost, ImplPreferenceManager, ImplValue};
+    let (tx, rx) = mpsc::channel();
+    webview.with_cef_webview(move |handle| {
+        let applied = (|| {
+            let context = handle.browser().host()?.request_context()?;
+            let mut value = cef::value_create()?;
+            value.set_string(Some(&crate::vpn::WEBRTC_POLICY.into()));
+            let mut error = cef::CefString::from("");
+            let ok = context.set_preference(
+                Some(&"webrtc.ip_handling_policy".into()),
+                Some(&mut value),
+                Some(&mut error),
+            ) == 1;
+            if !ok {
+                eprintln!("[pulpo] vpn: no se pudo limitar WebRTC: {error}");
+            }
+            Some(ok)
+        })();
+        let _ = tx.send(applied == Some(true));
+    })?;
+    match rx.recv_timeout(Duration::from_secs(5)) {
+        Ok(true) => Ok(()),
+        _ => Err(std::io::Error::other("WebRTC sin limitar").into()),
+    }
 }
 
 /// El tema que la página ve en `prefers-color-scheme`. Con `Dark` también el

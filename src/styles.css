@@ -440,6 +440,22 @@ label.check small {
   user-select: none;
 }
 
+/* Colocado con coordenadas de la ventana (getBoundingClientRect). */
+.context-menu.floating {
+  position: fixed;
+  z-index: 10;
+}
+
+#vpn-menu input {
+  width: 100%;
+  margin-bottom: 6px;
+}
+
+#vpn-list {
+  max-height: 280px;
+  overflow-y: auto;
+}
+
 .context-menu[hidden] {
   display: none;
 }

@@ -2,12 +2,14 @@ use std::sync::Arc;
 
 use blocker::Blocker;
 use webview2_com::Microsoft::Web::WebView2::Win32::*;
-use webview2_com::{take_pwstr, WebResourceRequestedEventHandler};
+use webview2_com::{
+    take_pwstr, SetPermissionStateCompletedHandler, WebResourceRequestedEventHandler,
+};
 use windows::core::{Interface, HSTRING, PWSTR};
 
 use crate::services::Theme;
 
-/// Engancha el bloqueo de red al webview y carga `url`. Se llama dentro de
+/// Engancha el bloqueo de red al webview, concede las notificaciones y carga `url`. Se llama dentro de
 /// `Webview::with_webview`, en el hilo principal, antes de la primera carga.
 pub fn attach(
     platform: tauri::webview::PlatformWebview,
@@ -21,17 +23,74 @@ pub fn attach(
     if !theme.is_auto() {
         set_theme_inner(platform, theme);
     }
-    let result = unsafe {
-        match blocker {
-            Some(blocker) => attach_inner(platform, blocker, url),
-            None => platform
-                .controller()
-                .CoreWebView2()
-                .and_then(|w| w.Navigate(&HSTRING::from(url))),
+    if let Some(blocker) = blocker {
+        if let Err(e) = unsafe { attach_inner(platform, blocker) } {
+            eprintln!("[pulpo] no se pudo enganchar el bloqueo en WebView2: {e}");
+        }
+    }
+    // La primera carga va después de conceder las notificaciones: la página lee
+    // `Notification.permission` al cargar.
+    let navigate = {
+        let url = url.to_string();
+        let webview = platform.controller().CoreWebView2();
+        move || {
+            if let Err(e) = webview.and_then(|w| unsafe { w.Navigate(&HSTRING::from(url)) }) {
+                eprintln!("[pulpo] no se pudo cargar la app en WebView2: {e}");
+            }
         }
     };
+    allow_notifications(platform, url, navigate);
+}
+
+/// Notificaciones concedidas de antemano para el origen de la app. Con solo
+/// responder a `PermissionRequested` no basta: WhatsApp y otras miran
+/// `Notification.permission` al cargar, ven "default" y no lo piden hasta que
+/// el usuario pulsa su aviso. Queda guardado en el perfil (solo de esta app),
+/// y también pisa un "denegado" de antes. `then` corre al terminar, aunque falle.
+fn allow_notifications(
+    platform: &tauri_runtime_wry::Webview,
+    url: &str,
+    then: impl FnOnce() + 'static,
+) {
+    let Some(origin) = tauri::Url::parse(url)
+        .ok()
+        .map(|u| u.origin().ascii_serialization())
+        .filter(|o| o != "null")
+    else {
+        return then();
+    };
+    let then = std::cell::RefCell::new(Some(then));
+    let then = std::rc::Rc::new(then);
+    let callback = then.clone();
+    let result = unsafe {
+        platform
+            .controller()
+            .CoreWebView2()
+            .and_then(|w| w.cast::<ICoreWebView2_13>())
+            .and_then(|w| w.Profile())
+            .and_then(|p| p.cast::<ICoreWebView2Profile4>())
+            .and_then(|p| {
+                p.SetPermissionState(
+                    COREWEBVIEW2_PERMISSION_KIND_NOTIFICATIONS,
+                    &HSTRING::from(origin.as_str()),
+                    COREWEBVIEW2_PERMISSION_STATE_ALLOW,
+                    &SetPermissionStateCompletedHandler::create(Box::new(move |result| {
+                        if let Err(e) = result {
+                            eprintln!("[pulpo] notificaciones no concedidas en {origin}: {e}");
+                        }
+                        if let Some(then) = callback.borrow_mut().take() {
+                            then();
+                        }
+                        Ok(())
+                    })),
+                )
+            })
+    };
     if let Err(e) = result {
-        eprintln!("[pulpo] no se pudo enganchar el bloqueo en WebView2: {e}");
+        eprintln!("[pulpo] no se pudieron conceder las notificaciones en WebView2: {e}");
+        if let Some(then) = then.borrow_mut().take() {
+            then();
+        }
     }
 }
 
@@ -59,7 +118,6 @@ fn set_theme_inner(platform: &tauri_runtime_wry::Webview, theme: Theme) {
 unsafe fn attach_inner(
     platform: &tauri_runtime_wry::Webview,
     blocker: Arc<Blocker>,
-    url: &str,
 ) -> windows::core::Result<()> {
     let webview = platform.controller().CoreWebView2()?;
     let env = platform.environment();
@@ -107,8 +165,7 @@ unsafe fn attach_inner(
         })),
         &mut token,
     )?;
-
-    webview.Navigate(&HSTRING::from(url))
+    Ok(())
 }
 
 fn request_type(context: COREWEBVIEW2_WEB_RESOURCE_CONTEXT) -> &'static str {

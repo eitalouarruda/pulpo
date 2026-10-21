@@ -32,6 +32,10 @@ pub struct Service {
     /// Tema que la app ve como preferido (`prefers-color-scheme`).
     #[serde(default, skip_serializing_if = "Theme::is_auto")]
     pub theme: Theme,
+    /// País por el que sale la app (código ISO de dos letras), con los
+    /// servidores de Urban VPN (ver `vpn`). Sin él, la conexión normal.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub vpn: Option<String>,
 }
 
 /// Tema preferido que se le dice a una app. Las que siguen el del navegador
@@ -204,6 +208,7 @@ fn defaults() -> Vec<Service> {
             enabled: true,
             dnd: Dnd::default(),
             theme: Theme::Auto,
+            vpn: None,
         },
         Service {
             id: "ytmusic".into(),
@@ -217,8 +222,15 @@ fn defaults() -> Vec<Service> {
             enabled: true,
             dnd: Dnd::default(),
             theme: Theme::Auto,
+            vpn: None,
         },
     ]
+}
+
+/// Código de país válido (dos letras), en mayúsculas.
+pub fn normalize_vpn(vpn: Option<String>) -> Option<String> {
+    vpn.map(|v| v.trim().to_uppercase())
+        .filter(|v| v.len() == 2 && v.bytes().all(|b| b.is_ascii_uppercase()))
 }
 
 pub fn config_path(data_dir: &Path) -> PathBuf {

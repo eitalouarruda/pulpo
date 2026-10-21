@@ -17,6 +17,8 @@ interface Service {
   dnd?: Dnd;
   /// Tema que la app ve como preferido (como `services::Theme`).
   theme?: AppTheme;
+  /// País por el que sale con la VPN (ISO de dos letras), como `Service::vpn`.
+  vpn?: string | null;
 }
 
 type AppTheme = "auto" | "light" | "dark";
@@ -622,6 +624,7 @@ function openMenu(s: Service, top: number, left?: number) {
           adblock: !s.adblock,
           group: s.group ?? null,
           theme: s.theme ?? "auto",
+          vpn: s.vpn ?? null,
         }).catch(
           console.error,
         ),
@@ -837,6 +840,7 @@ interface FormInit {
   icon_source?: IconSource;
   dnd?: Dnd;
   theme?: AppTheme;
+  vpn?: string | null;
 }
 
 let formTheme: AppTheme = "auto";
@@ -858,6 +862,119 @@ function renderFormTheme() {
     }),
   );
 }
+
+/// VPN del formulario: país (ISO) o `null` para la conexión normal.
+let formVpn: string | null = null;
+/// Países con servidores gratuitos; se piden la primera vez que se abre la lista.
+let vpnCountries: string[] | null = null;
+const vpnMenu = $("#vpn-menu");
+const vpnSearch = $<HTMLInputElement>("#vpn-search");
+const vpnButton = $<HTMLButtonElement>("#f-vpn");
+
+function countryName(code: string): string {
+  try {
+    return new Intl.DisplayNames([currentLanguage()], { type: "region" }).of(code) ?? code;
+  } catch {
+    return code;
+  }
+}
+
+const vpnLabel = (code: string | null) => (code ? `${countryName(code)} (${code})` : t("form.vpnOff"));
+
+function renderFormVpn() {
+  vpnButton.textContent = vpnLabel(formVpn);
+}
+
+function renderVpnList() {
+  const item = (code: string | null) => {
+    const b = document.createElement("button");
+    b.type = "button";
+    b.role = "menuitemradio";
+    b.setAttribute("aria-checked", String(code === formVpn));
+    b.innerHTML = `<span class="mark"></span><span></span>`;
+    b.lastElementChild!.textContent = vpnLabel(code);
+    b.addEventListener("click", () => {
+      formVpn = code;
+      renderFormVpn();
+      closeVpnMenu();
+    });
+    return b;
+  };
+  const note = (text: string) => {
+    const p = document.createElement("div");
+    p.className = "menu-title";
+    p.textContent = text;
+    return p;
+  };
+  if (!vpnCountries) {
+    $("#vpn-list").replaceChildren(item(null), note(t("form.vpnLoading")));
+    return;
+  }
+  const typed = vpnSearch.value.trim().toLowerCase();
+  const codes = vpnCountries
+    .filter((c) => !typed || c.toLowerCase() === typed || countryName(c).toLowerCase().includes(typed))
+    .sort((a, b) => countryName(a).localeCompare(countryName(b), currentLanguage()));
+  $("#vpn-list").replaceChildren(item(null), document.createElement("hr"), ...codes.map(item));
+}
+
+function placeVpnMenu() {
+  const r = vpnButton.getBoundingClientRect();
+  vpnMenu.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - vpnMenu.offsetWidth - 8))}px`;
+  // Debajo del botón, o encima si no cabe.
+  const below = r.bottom + 4;
+  vpnMenu.style.top = `${below + vpnMenu.offsetHeight > window.innerHeight - 8 ? Math.max(8, r.top - vpnMenu.offsetHeight - 4) : below}px`;
+}
+
+function openVpnMenu() {
+  vpnSearch.value = "";
+  renderVpnList();
+  vpnMenu.hidden = false;
+  placeVpnMenu();
+  vpnSearch.focus();
+  if (vpnCountries) return;
+  invoke<string[]>("vpn_countries")
+    .then((list) => {
+      vpnCountries = list;
+      if (!vpnMenu.hidden) {
+        renderVpnList();
+        placeVpnMenu();
+      }
+    })
+    .catch((err) => {
+      $("#vpn-list").replaceChildren(
+        Object.assign(document.createElement("div"), { className: "menu-title", textContent: tError(err) }),
+      );
+    });
+}
+
+function closeVpnMenu() {
+  vpnMenu.hidden = true;
+}
+
+vpnButton.addEventListener("click", () => (vpnMenu.hidden ? openVpnMenu() : closeVpnMenu()));
+vpnSearch.addEventListener("input", renderVpnList);
+vpnSearch.addEventListener("keydown", (e) => {
+  if (e.key === "Enter") {
+    // Enter elige el primer país de la lista, no envía el formulario.
+    e.preventDefault();
+    $("#vpn-list").querySelectorAll<HTMLButtonElement>("button")[1]?.click();
+  }
+});
+document.addEventListener("pointerdown", (e) => {
+  const target = e.target as HTMLElement;
+  if (!vpnMenu.hidden && !vpnMenu.contains(target) && target !== vpnButton) closeVpnMenu();
+});
+// Esc con la lista abierta solo la cierra a ella, no el diálogo.
+window.addEventListener(
+  "keydown",
+  (e) => {
+    if (e.key === "Escape" && !vpnMenu.hidden) {
+      e.stopImmediatePropagation();
+      closeVpnMenu();
+    }
+  },
+  true,
+);
 
 // Sugerencias del campo de grupo: los grupos que ya existen y contienen lo escrito.
 let groupIndex = -1;
@@ -941,6 +1058,8 @@ function openForm(init: FormInit, edit: string | null) {
   renderSchedules();
   formTheme = init.theme ?? "auto";
   renderFormTheme();
+  formVpn = init.vpn ?? null;
+  renderFormVpn();
   iconChoice = { source: init.icon_source ?? "web", icon: init.icon ?? null };
   renderIconPreview();
   form.error.textContent = "";
@@ -1121,6 +1240,7 @@ views.form.addEventListener("submit", async (e) => {
     adblock: form.adblock.checked,
     group: form.group.value.trim() || null,
     theme: formTheme,
+    vpn: formVpn,
   };
   form.submit.disabled = true;
   try {

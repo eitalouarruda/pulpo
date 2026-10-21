@@ -222,6 +222,18 @@
           <small class="dnd-hint" data-i18n="form.themeHint"></small>
         </div>
         <div class="field">
+          <span class="field-label" data-i18n="form.vpn"></span>
+          <div class="icon-row">
+            <button type="button" class="ghost-btn" id="f-vpn"></button>
+          </div>
+          <small class="dnd-hint" data-i18n="form.vpnHint"></small>
+          <!-- Lista de países: sin <select>, su lista nativa se cierra sola. -->
+          <div class="context-menu floating" id="vpn-menu" role="menu" hidden>
+            <input id="vpn-search" type="search" spellcheck="false" />
+            <div id="vpn-list"></div>
+          </div>
+        </div>
+        <div class="field">
           <span class="field-label" data-i18n="dnd.title"></span>
           <div id="f-dnd-list"></div>
           <button type="button" class="ghost-btn dnd-add" id="f-dnd-add" data-i18n="dnd.add"></button>

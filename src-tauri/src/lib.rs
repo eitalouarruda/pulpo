@@ -12,6 +12,7 @@ mod spellcheck;
 #[cfg(windows)]
 mod tray;
 mod update;
+mod vpn;
 mod wallpaper;
 
 use std::collections::BTreeSet;
@@ -249,6 +250,7 @@ fn add_service(
     adblock: bool,
     group: Option<String>,
     theme: Theme,
+    vpn: Option<String>,
 ) -> Result<Service, String> {
     let url = services::normalize_url(&url)?;
     let state = app.state::<AppState>();
@@ -273,6 +275,7 @@ fn add_service(
             enabled: true,
             dnd: Dnd::default(),
             theme,
+            vpn: services::normalize_vpn(vpn),
         };
         list.push(service.clone());
         service
@@ -285,6 +288,7 @@ fn add_service(
 }
 
 #[tauri::command]
+#[allow(clippy::too_many_arguments)] // los campos del formulario
 fn update_service(
     app: AppHandle,
     id: String,
@@ -293,7 +297,9 @@ fn update_service(
     adblock: bool,
     group: Option<String>,
     theme: Theme,
+    vpn: Option<String>,
 ) -> Result<(), String> {
+    let vpn = services::normalize_vpn(vpn);
     let url = services::normalize_url(&url)?;
     let state = app.state::<AppState>();
     let (url_changed, reopen) = {
@@ -305,7 +311,11 @@ fn update_service(
         let url_changed = service.url != url;
         // El tema también: cambiarlo en caliente no llega a todas las páginas
         // (algunas lo leen solo al crear el webview).
-        let reopen = url_changed || service.adblock != adblock || service.theme != theme;
+        // El proxy de la VPN también se fija al crear el webview.
+        let reopen = url_changed
+            || service.adblock != adblock
+            || service.theme != theme
+            || service.vpn != vpn;
         if !name.trim().is_empty() {
             service.name = name.trim().to_string();
         }
@@ -318,6 +328,7 @@ fn update_service(
         service.adblock = adblock;
         service.group = services::normalize_group(group);
         service.theme = theme;
+        service.vpn = vpn;
         (url_changed, reopen)
     };
     services_changed(&app);
@@ -325,7 +336,7 @@ fn update_service(
         fetch_icon(&app, id.clone(), url);
     }
     if reopen {
-        // El bloqueo de red, los scripts y el tema se fijan al crear el webview.
+        // El bloqueo de red, los scripts, el tema y la VPN se fijan al crear el webview.
         let app = app.clone();
         std::thread::spawn(move || {
             close_webview(&app, &id);
@@ -837,6 +848,7 @@ pub fn run() {
             wallpaper::wallpaper_delete,
             wallpaper::wallpaper_import,
             wallpaper::wallpaper_search,
+            vpn::vpn_countries,
             wallpaper::wallpaper_download,
         ])
         .run(tauri::generate_context!())
@@ -1138,9 +1150,24 @@ fn open_service(
                     }
                 }
             });
+    // VPN: todo pasa por el proxy local de su país. Si no arranca, la app no
+    // se abre: nunca sale por la conexión normal sin que el usuario lo sepa.
+    let proxy = match service.vpn.as_deref() {
+        Some(country) => Some(vpn::proxy_url(country)?),
+        None => None,
+    };
     #[cfg(windows)]
     {
-        builder = builder.additional_browser_args(&spellcheck::webview2_args());
+        // wry ignora `proxy_url` cuando hay argumentos propios: van aquí.
+        let mut args = spellcheck::webview2_args();
+        if let Some(proxy) = &proxy {
+            args.push_str(&format!(" --proxy-server={proxy} {}", vpn::WEBRTC_ARG));
+        }
+        builder = builder.additional_browser_args(&args);
+    }
+    #[cfg(target_os = "linux")]
+    if let Some(proxy) = &proxy {
+        builder = builder.proxy_url(proxy.clone());
     }
     #[cfg(target_os = "linux")]
     if let Some(script) = platform::compose_script() {
@@ -1175,7 +1202,14 @@ fn open_service(
     }
 
     #[cfg(target_os = "linux")]
-    platform::attach(&webview, initial_load, blocker, &service.url, service.theme)?;
+    platform::attach(
+        &webview,
+        initial_load,
+        blocker,
+        &service.url,
+        service.theme,
+        proxy.is_some(),
+    )?;
     #[cfg(windows)]
     {
         let url = service.url.clone();
