@@ -32,7 +32,7 @@ pub fn attach(
     // `Notification.permission` al cargar.
     let navigate = {
         let url = url.to_string();
-        let webview = platform.controller().CoreWebView2();
+        let webview = unsafe { platform.controller().CoreWebView2() };
         move || {
             if let Err(e) = webview.and_then(|w| unsafe { w.Navigate(&HSTRING::from(url)) }) {
                 eprintln!("[pulpo] no se pudo cargar la app en WebView2: {e}");
