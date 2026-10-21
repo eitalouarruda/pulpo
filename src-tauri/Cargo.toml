@@ -49,6 +49,8 @@ libloading = "0.8"
 # Windows: WebView2, que ya es Chromium y viene con el sistema.
 [target.'cfg(windows)'.dependencies]
 blocker = { path = "crates/blocker" }
+# Icono en la bandeja del sistema: al cerrar, Pulpo sigue ahí (ver `tray.rs`).
+tauri = { version = "=3.0.0-alpha.4", features = ["unstable", "tray-icon"] }
 tauri-runtime-wry = { version = "=3.0.0-alpha.4", features = ["unstable"] }
 webview2-com = "0.39"
 windows = { version = "0.62", features = ["Win32_System_Com", "Win32_Globalization"] }

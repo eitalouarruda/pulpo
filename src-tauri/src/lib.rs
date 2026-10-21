@@ -9,7 +9,10 @@ mod popups;
 mod services;
 mod shortcuts;
 mod spellcheck;
+#[cfg(windows)]
+mod tray;
 mod update;
+mod wallpaper;
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -21,7 +24,7 @@ use blocker::Blocker;
 use serde::Serialize;
 #[cfg(target_os = "linux")]
 use tauri::webview::PageLoadEvent;
-use tauri::webview::{NewWindowResponse, WebviewBuilder};
+use tauri::webview::{NewWindowResponse, PermissionKind, PermissionResponse, WebviewBuilder};
 use tauri::window::WindowBuilder;
 use tauri::{
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Url, Webview, WebviewUrl,
@@ -29,7 +32,7 @@ use tauri::{
 };
 use tauri_plugin_opener::OpenerExt;
 
-use services::{Dnd, DndSchedule, IconSource, Preset, Service};
+use services::{Dnd, DndSchedule, IconSource, Preset, Service, Theme};
 
 /// Ancho de la barra lateral (webview "shell"), en píxeles lógicos.
 const SIDEBAR_WIDTH: f64 = 64.0;
@@ -245,6 +248,7 @@ fn add_service(
     url: String,
     adblock: bool,
     group: Option<String>,
+    theme: Theme,
 ) -> Result<Service, String> {
     let url = services::normalize_url(&url)?;
     let state = app.state::<AppState>();
@@ -268,6 +272,7 @@ fn add_service(
             adblock,
             enabled: true,
             dnd: Dnd::default(),
+            theme,
         };
         list.push(service.clone());
         service
@@ -287,6 +292,7 @@ fn update_service(
     url: String,
     adblock: bool,
     group: Option<String>,
+    theme: Theme,
 ) -> Result<(), String> {
     let url = services::normalize_url(&url)?;
     let state = app.state::<AppState>();
@@ -297,7 +303,9 @@ fn update_service(
             .find(|s| s.id == id)
             .ok_or("error.unknownService")?;
         let url_changed = service.url != url;
-        let reopen = url_changed || service.adblock != adblock;
+        // El tema también: cambiarlo en caliente no llega a todas las páginas
+        // (algunas lo leen solo al crear el webview).
+        let reopen = url_changed || service.adblock != adblock || service.theme != theme;
         if !name.trim().is_empty() {
             service.name = name.trim().to_string();
         }
@@ -309,6 +317,7 @@ fn update_service(
         }
         service.adblock = adblock;
         service.group = services::normalize_group(group);
+        service.theme = theme;
         (url_changed, reopen)
     };
     services_changed(&app);
@@ -316,7 +325,7 @@ fn update_service(
         fetch_icon(&app, id.clone(), url);
     }
     if reopen {
-        // El bloqueo de red y los scripts se fijan al crear el webview.
+        // El bloqueo de red, los scripts y el tema se fijan al crear el webview.
         let app = app.clone();
         std::thread::spawn(move || {
             close_webview(&app, &id);
@@ -608,6 +617,14 @@ fn set_overlay(app: AppHandle, open: bool) {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // Instancia de pruebas (`./dev.sh --test`): datos y caché aparte, para
+    // poder abrirla junto a la de uso real. Antes de todo: Tauri y Chromium
+    // leen estas variables al resolver sus carpetas.
+    #[cfg(target_os = "linux")]
+    if let Some(home) = diag::test_home() {
+        std::env::set_var("XDG_DATA_HOME", home.join("data"));
+        std::env::set_var("XDG_CACHE_HOME", home.join("cache"));
+    }
     let builder = tauri::Builder::default();
     #[cfg(target_os = "linux")]
     let builder = builder.runtime({
@@ -631,8 +648,13 @@ pub fn run() {
                 cef = cef.command_line_arg(arg, None::<String>);
             }
         }
+        // Con la API del runtime: si no, fija `remote_debugging.allowed` a
+        // false y Chromium rechaza el puerto aunque llegue por la línea de órdenes.
         match diag::debug_port() {
-            Some(port) => cef.command_line_arg("remote-debugging-port", Some(port)),
+            Some(port) => cef.remote_debugging(tauri_runtime_cef::RemoteDebugging::Port {
+                port,
+                allowed_origins: Vec::new(),
+            }),
             None => cef,
         }
     });
@@ -687,7 +709,11 @@ pub fn run() {
             ci::watch(app.handle());
 
             let window = WindowBuilder::new(app, "main")
-                .title("Pulpo")
+                .title(if diag::test_home().is_some() {
+                    "Pulpo (test)"
+                } else {
+                    "Pulpo"
+                })
                 .inner_size(1280.0, 820.0)
                 .min_inner_size(640.0, 420.0)
                 .build()?;
@@ -721,9 +747,19 @@ pub fn run() {
                 })
             };
             window.add_child(shell)?;
+            #[cfg(windows)]
+            tray::create(app.handle())?;
             let handle = app.handle().clone();
+            #[cfg(windows)]
+            let tray_window = window.clone();
             window.on_window_event(move |event| {
                 match event {
+                    // Windows: cerrar la deja en la bandeja, funcionando (ver `tray.rs`).
+                    #[cfg(windows)]
+                    WindowEvent::CloseRequested { api, .. } => {
+                        api.prevent_close();
+                        let _ = tray_window.hide();
+                    }
                     // Al pasar a otra pantalla cambia el zoom (y con él el layout).
                     WindowEvent::Moved(_) => update_zoom(&handle, false),
                     WindowEvent::Resized(_) | WindowEvent::ScaleFactorChanged { .. } => {
@@ -784,6 +820,7 @@ pub fn run() {
             check_update,
             install_update,
             ci::ci_accounts,
+            ci::ci_check_token,
             ci::ci_runs,
             ci::ci_add_token,
             ci::ci_remove_account,
@@ -793,6 +830,14 @@ pub fn run() {
             ci::ci_notify,
             ci::ci_enabled,
             ci::ci_set_enabled,
+            set_tray_texts,
+            wallpaper::wallpaper_get,
+            wallpaper::wallpaper_list,
+            wallpaper::wallpaper_use,
+            wallpaper::wallpaper_delete,
+            wallpaper::wallpaper_import,
+            wallpaper::wallpaper_search,
+            wallpaper::wallpaper_download,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
@@ -813,6 +858,32 @@ pub(crate) fn data_dir() -> Option<PathBuf> {
 pub(crate) fn cef_root() -> Option<PathBuf> {
     data_dir().map(|dir| dir.join("com.pulpo.app").join("cef"))
 }
+
+/// Textos del menú de la bandeja (solo Windows tiene bandeja).
+#[tauri::command]
+fn set_tray_texts(app: AppHandle, show: String, quit: String) {
+    #[cfg(windows)]
+    tray::set_tray_texts(app, show, quit);
+    #[cfg(not(windows))]
+    let _ = (app, show, quit);
+}
+
+/// Fondo de la página para las que no pintan el suyo: `Canvas` es blanco, u
+/// oscuro si la página declara `color-scheme: dark`. Con `:where` no pesa
+/// nada: cualquier fondo de la página manda.
+const CANVAS_SCRIPT: &str = r#"(() => {
+  const add = () => {
+    const style = document.createElement("style");
+    style.textContent = ":where(html) { background-color: Canvas; }";
+    document.documentElement.prepend(style);
+  };
+  if (document.documentElement) return add();
+  new MutationObserver((_, observer) => {
+    if (!document.documentElement) return;
+    observer.disconnect();
+    add();
+  }).observe(document, { childList: true });
+})();"#;
 
 /// Carpeta del perfil (cookies, sesión, caché) de un servicio.
 fn profile_dir(app: &AppHandle, id: &str) -> Option<PathBuf> {
@@ -986,6 +1057,19 @@ fn open_service(
             // Sin el manejador de soltar archivos de Tauri: no hace falta y en CEF
             // añade un paso por cada petición.
             .disable_drag_drop_handler()
+            // Fondo blanco, como un navegador normal. Sin él CEF usa uno negro y
+            // las páginas que no pintan su fondo (webmail de Locaweb) quedan con
+            // texto oscuro sobre negro. Solo se respeta en los webviews creados
+            // al arrancar; `CANVAS_SCRIPT` cubre los recreados después.
+            .background_color(tauri::window::Color(255, 255, 255, 255))
+            .initialization_script(CANVAS_SCRIPT)
+            // Notificaciones permitidas: la app la añadió el usuario (como en
+            // Rambox) y "No molestar" las silencia. WebView2 no tiene dónde
+            // aceptarlas y las dejaba bloqueadas; CEF ya las permitía.
+            .on_permission_request(|_, kind| match kind {
+                PermissionKind::Notifications => PermissionResponse::Allow,
+                _ => PermissionResponse::Default,
+            })
             .initialization_script(shortcuts::script())
             .initialization_script(dnd::SCRIPT)
             .on_document_title_changed(move |webview: Webview, title| {
@@ -1091,11 +1175,12 @@ fn open_service(
     }
 
     #[cfg(target_os = "linux")]
-    platform::attach(&webview, initial_load, blocker, &service.url)?;
+    platform::attach(&webview, initial_load, blocker, &service.url, service.theme)?;
     #[cfg(windows)]
     {
         let url = service.url.clone();
-        webview.with_webview(move |platform| platform::attach(platform, blocker, &url))?;
+        let theme = service.theme;
+        webview.with_webview(move |platform| platform::attach(platform, blocker, &url, theme))?;
     }
     Ok(())
 }

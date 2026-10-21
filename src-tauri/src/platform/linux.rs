@@ -8,6 +8,8 @@ use std::time::{Duration, Instant};
 
 use blocker::Blocker;
 use tauri::Webview;
+
+use crate::services::Theme;
 use tauri_runtime_cef::cef;
 use tauri_runtime_cef::{allocate_devtools_message_id, DevToolsProtocol, WebviewCefExt};
 
@@ -72,9 +74,13 @@ pub fn attach(
     initial_load: mpsc::Receiver<()>,
     blocker: Option<Arc<Blocker>>,
     url: &str,
+    theme: Theme,
 ) -> tauri::Result<()> {
     if initial_load.recv_timeout(Duration::from_secs(10)).is_err() {
         eprintln!("[pulpo] {url}: la carga inicial no terminó; se navega igual");
+    }
+    if let Err(e) = set_theme(webview, theme) {
+        eprintln!("[pulpo] {url}: no se pudo fijar el tema: {e}");
     }
     if let Err(e) = super::enable_drag(webview) {
         eprintln!("[pulpo] {url}: arrastrar y soltar no disponible: {e}");
@@ -85,6 +91,40 @@ pub fn attach(
         }
     }
     webview.navigate(url.parse().expect("url del servicio"))
+}
+
+/// El tema que la página ve en `prefers-color-scheme`. Con `Dark` también el
+/// oscurecido automático de Chromium, para las páginas sin tema oscuro propio
+/// (las que ya son oscuras no cambian). Se fija al crear el webview, antes de
+/// la primera navegación, y se mantiene al navegar.
+fn set_theme(webview: &Webview, theme: Theme) -> Result<(), String> {
+    let value = match theme {
+        // El del navegador: nada que emular.
+        Theme::Auto => return Ok(()),
+        Theme::Light => "light",
+        Theme::Dark => "dark",
+    };
+    let send = |method: &str, params: serde_json::Value| {
+        let message = serde_json::json!({
+            "id": allocate_devtools_message_id().map_err(|e| e.to_string())?,
+            "method": method,
+            "params": params,
+        });
+        webview
+            .send_dev_tools_message(message.to_string().as_bytes())
+            .map_err(|e| e.to_string())
+    };
+    send(
+        "Emulation.setEmulatedMedia",
+        serde_json::json!({ "features": [{ "name": "prefers-color-scheme", "value": value }] }),
+    )?;
+    if theme == Theme::Dark {
+        send(
+            "Emulation.setAutoDarkModeOverride",
+            serde_json::json!({ "enabled": true }),
+        )?;
+    }
+    Ok(())
 }
 
 fn enable_blocking(

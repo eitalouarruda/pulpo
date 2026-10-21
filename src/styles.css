@@ -10,7 +10,32 @@
   --badge: #e5484d;
   --ok: #30a46c;
   --warn: #f5a524;
+  /* Fondo de los diálogos, velo del menú, luna de no molestar, sombras. */
+  --overlay-bg: #111117;
+  --backdrop: rgb(10 10 14 / 0.6);
+  --moon: #c4b5fd;
+  --shadow: rgb(0 0 0 / 0.45);
   color-scheme: dark;
+}
+
+/* Tema claro (Ajustes → Tema; "Sistema" lo elige según el escritorio). */
+:root[data-theme="light"] {
+  --bg: #f3f3f7;
+  --panel: #ffffff;
+  --field: #ebeaf2;
+  --line: #d5d4e1;
+  --fg: #1c1c26;
+  --muted: #696980;
+  --active: #1c1c26;
+  --accent: #7c3fb8;
+  --badge: #dc3e42;
+  --ok: #218358;
+  --warn: #e09400;
+  --overlay-bg: #e6e5ee;
+  --backdrop: rgb(28 28 38 / 0.3);
+  --moon: #6e56cf;
+  --shadow: rgb(0 0 0 / 0.16);
+  color-scheme: light;
 }
 
 * {
@@ -138,14 +163,15 @@ button {
 
 #add {
   flex: none;
+  display: grid;
+  place-items: center;
   width: 40px;
   height: 40px;
+  padding: 0;
   border: 1px dashed var(--line);
   border-radius: 12px;
   background: none;
   color: var(--muted);
-  font-size: 22px;
-  line-height: 1;
   cursor: pointer;
 }
 
@@ -191,7 +217,7 @@ button {
   grid-template-rows: minmax(0, 1fr);
   padding: 24px;
   border-left: 1px solid var(--line);
-  background: #111117;
+  background: var(--overlay-bg);
   user-select: text;
 }
 
@@ -209,7 +235,14 @@ button {
   border: 1px solid var(--line);
   border-radius: 14px;
   background: var(--panel);
-  box-shadow: 0 20px 60px rgb(0 0 0 / 0.45);
+  box-shadow: 0 20px 60px var(--shadow);
+}
+
+/* Barras de desplazamiento finas, con los colores del tema. */
+.card,
+.card * {
+  scrollbar-width: thin;
+  scrollbar-color: var(--line) transparent;
 }
 
 .card[hidden] {
@@ -218,6 +251,22 @@ button {
 
 form.card {
   width: min(480px, 100%);
+  /* En pantallas bajas el formulario no cabe: se desplaza, con los botones
+     siempre a la vista abajo. */
+  overflow-y: auto;
+}
+
+form.card > * {
+  flex-shrink: 0;
+}
+
+form.card footer {
+  position: sticky;
+  bottom: -24px;
+  margin: 0 -24px -24px;
+  padding: 12px 24px 24px;
+  border-top: 1px solid var(--line);
+  background: var(--panel);
 }
 
 .card h2 {
@@ -376,7 +425,7 @@ label.check small {
 #overlay.menu-mode {
   display: block;
   padding: 0;
-  background: rgb(10 10 14 / 0.6);
+  background: var(--backdrop);
 }
 
 .context-menu {
@@ -387,7 +436,7 @@ label.check small {
   border: 1px solid var(--line);
   border-radius: 10px;
   background: var(--panel);
-  box-shadow: 0 12px 40px rgb(0 0 0 / 0.5);
+  box-shadow: 0 12px 40px var(--shadow);
   user-select: none;
 }
 
@@ -678,12 +727,131 @@ label.check small {
   display: none;
 }
 
-#ci-view {
+/* CI ocupa el área de las apps, como la página inicial; sus modales van
+   encima, sobre un velo. */
+#overlay.page-mode {
+  position: relative;
+  background: var(--bg);
+}
+
+.page-view {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 28px 32px;
   overflow-y: auto;
 }
 
-#ci-view > * {
+.page-view[hidden] {
+  display: none;
+}
+
+.page-view > * {
   flex-shrink: 0;
+}
+
+.page-view header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.page-view h2 {
+  flex: 1;
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+#overlay.ci-modal-open::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  background: var(--backdrop);
+}
+
+.ci-modal {
+  position: relative;
+  z-index: 2;
+}
+
+#ci-setup-view {
+  overflow: hidden;
+}
+
+#ci-setup-view > * {
+  flex-shrink: 0;
+}
+
+#ci-setup-view footer {
+  justify-content: space-between;
+}
+
+#ci-repo-search {
+  width: 200px;
+  padding: 6px 9px;
+}
+
+/* Árbol: cada token y sus repos debajo, con scroll. */
+#ci-tree {
+  flex: 1 1 auto;
+  min-height: 120px;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  color: var(--muted);
+}
+
+.ci-tree-account {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--field);
+  color: var(--fg);
+}
+
+.ci-tree-repos {
+  display: flex;
+  flex-direction: column;
+  margin-left: 6px;
+  padding-left: 12px;
+  border-left: 1px solid var(--line);
+  color: var(--muted);
+}
+
+.ci-tree-repos label.check,
+#ci-token-repos label.check {
+  align-items: center;
+  padding: 3px 2px;
+}
+
+.ci-tree-repos small,
+#ci-token-repos small {
+  display: inline;
+  color: var(--muted);
+}
+
+/* `.links-box` fija `display`: sin esto `hidden` no la oculta. */
+#ci-token-box[hidden] {
+  display: none;
+}
+
+#ci-token-repos {
+  display: flex;
+  flex-direction: column;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+#ci-token-search {
+  width: 160px;
+  padding: 5px 8px;
 }
 
 #ci-runs {
@@ -773,22 +941,6 @@ label.check small {
   display: none;
 }
 
-#ci-accounts,
-#ci-repos {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-#ci-repos {
-  max-height: 280px;
-  overflow-y: auto;
-}
-
-#ci-accounts:empty {
-  display: none;
-}
-
 .ci-account {
   display: flex;
   align-items: center;
@@ -799,27 +951,17 @@ label.check small {
   flex: 1;
 }
 
+.ci-account small {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .ci-account .warn {
   color: var(--badge);
   font-size: 12px;
 }
 
-#ci-repos label.check {
-  align-items: center;
-  padding: 3px 2px;
-}
-
-#ci-repos small {
-  display: inline;
-  color: var(--muted);
-}
-
-#ci-repo-search {
-  width: 180px;
-  padding: 5px 8px;
-}
-
-#ci-setup .hint a {
+#ci-token-view .hint a {
   color: var(--accent);
 }
 
@@ -1266,7 +1408,7 @@ body.split .home-hint {
   border: 1px solid var(--line);
   border-radius: 50%;
   background: var(--panel);
-  color: #c4b5fd;
+  color: var(--moon);
   font-size: 11px;
   line-height: 15px;
   text-align: center;
@@ -1439,7 +1581,7 @@ body.split .home-hint {
   border: 1px solid var(--line);
   border-radius: 8px;
   background: var(--bg);
-  box-shadow: 0 10px 30px rgb(0 0 0 / 0.5);
+  box-shadow: 0 10px 30px var(--shadow);
 }
 
 .suggest[hidden] {
@@ -1456,4 +1598,218 @@ body.split .home-hint {
 .suggest div:hover,
 .suggest div[aria-selected="true"] {
   background: var(--field);
+}
+
+/* ------------------------------------------------------------ fondo de pantalla */
+
+body.has-wallpaper #overlay.home-mode {
+  background: var(--bg) var(--wallpaper) center / cover no-repeat;
+}
+
+/* Sobre una foto: los nombres de las apps se leen con una sombra. */
+body.has-wallpaper #home-view {
+  text-shadow: 0 1px 3px rgb(0 0 0 / 0.7);
+  color: #fff;
+}
+
+body.has-wallpaper .home-group h3,
+body.has-wallpaper .home-hint {
+  color: rgb(255 255 255 / 0.85);
+}
+
+/* Página del fondo: todo el área de las apps. */
+#overlay.wallpaper-mode {
+  position: relative;
+  overflow: hidden;
+}
+
+#wallpaper-view {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 24px 32px 0;
+  overflow: hidden;
+  background: var(--bg);
+}
+
+#wallpaper-view[hidden] {
+  display: none;
+}
+
+#wallpaper-view > * {
+  flex-shrink: 0;
+}
+
+#wallpaper-view header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+#wallpaper-view h2 {
+  flex: 1;
+  margin: 0;
+  font-size: 17px;
+  font-weight: 600;
+}
+
+#wallpaper-view .error:empty {
+  display: none;
+}
+
+#wallpaper-scroll {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin: 0 -32px;
+  padding: 0 32px 24px;
+  overflow-y: auto;
+}
+
+/* Guardados: una fila, con scroll horizontal si no caben. */
+#wallpaper-saved {
+  display: flex;
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 4px;
+}
+
+#wallpaper-saved:empty {
+  display: none;
+}
+
+#wallpaper-saved .wallpaper-tile {
+  flex: none;
+  width: 180px;
+}
+
+#wallpaper-view h3 {
+  margin: 8px 0 0;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.wallpaper-search {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.wallpaper-search h3 {
+  margin: 0 !important;
+}
+
+#wallpaper-query {
+  width: min(320px, 100%);
+  padding: 6px 9px;
+}
+
+.wallpaper-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.wallpaper-grid:empty {
+  display: none;
+}
+
+.wallpaper-tile {
+  position: relative;
+  aspect-ratio: 16 / 10;
+  padding: 0;
+  overflow: hidden;
+  border: 2px solid transparent;
+  border-radius: 10px;
+  background: var(--field);
+  cursor: pointer;
+}
+
+.wallpaper-tile img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.wallpaper-tile:hover,
+.wallpaper-tile:focus-visible {
+  border-color: var(--line);
+}
+
+.wallpaper-tile[aria-current="true"] {
+  border-color: var(--accent);
+}
+
+.wallpaper-tile.busy {
+  opacity: 0.5;
+  cursor: progress;
+}
+
+.wallpaper-tile small {
+  position: absolute;
+  left: 6px;
+  bottom: 6px;
+  padding: 1px 6px;
+  border-radius: 6px;
+  background: rgb(0 0 0 / 0.6);
+  color: #fff;
+  font-size: 11px;
+}
+
+.wallpaper-tile .remove {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  display: none;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(0 0 0 / 0.65);
+  color: #fff;
+  cursor: pointer;
+}
+
+.wallpaper-tile:hover .remove {
+  display: grid;
+  place-items: center;
+}
+
+#wallpaper-more {
+  flex: none;
+  align-self: center;
+}
+
+#wallpaper-toast {
+  position: absolute;
+  left: 50%;
+  bottom: 24px;
+  z-index: 3;
+  padding: 8px 16px;
+  border-radius: 8px;
+  background: var(--ok);
+  color: #fff;
+  font-weight: 600;
+  box-shadow: 0 8px 24px var(--shadow);
+  opacity: 0;
+  pointer-events: none;
+  transform: translate(-50%, 8px);
+  transition:
+    opacity 0.2s,
+    transform 0.2s;
+}
+
+#wallpaper-toast.show {
+  opacity: 1;
+  transform: translate(-50%, 0);
 }

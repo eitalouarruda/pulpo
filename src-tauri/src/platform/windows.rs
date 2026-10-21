@@ -5,12 +5,22 @@ use webview2_com::Microsoft::Web::WebView2::Win32::*;
 use webview2_com::{take_pwstr, WebResourceRequestedEventHandler};
 use windows::core::{Interface, HSTRING, PWSTR};
 
+use crate::services::Theme;
+
 /// Engancha el bloqueo de red al webview y carga `url`. Se llama dentro de
 /// `Webview::with_webview`, en el hilo principal, antes de la primera carga.
-pub fn attach(platform: tauri::webview::PlatformWebview, blocker: Option<Arc<Blocker>>, url: &str) {
+pub fn attach(
+    platform: tauri::webview::PlatformWebview,
+    blocker: Option<Arc<Blocker>>,
+    url: &str,
+    theme: Theme,
+) {
     let Some(platform) = platform.downcast_ref::<tauri_runtime_wry::Webview>() else {
         return;
     };
+    if !theme.is_auto() {
+        set_theme_inner(platform, theme);
+    }
     let result = unsafe {
         match blocker {
             Some(blocker) => attach_inner(platform, blocker, url),
@@ -22,6 +32,27 @@ pub fn attach(platform: tauri::webview::PlatformWebview, blocker: Option<Arc<Blo
     };
     if let Err(e) = result {
         eprintln!("[pulpo] no se pudo enganchar el bloqueo en WebView2: {e}");
+    }
+}
+
+/// El tema que la página ve en `prefers-color-scheme` (del perfil, que es
+/// solo de esta app). Se fija al crear el webview.
+fn set_theme_inner(platform: &tauri_runtime_wry::Webview, theme: Theme) {
+    let scheme = match theme {
+        Theme::Auto => COREWEBVIEW2_PREFERRED_COLOR_SCHEME_AUTO,
+        Theme::Light => COREWEBVIEW2_PREFERRED_COLOR_SCHEME_LIGHT,
+        Theme::Dark => COREWEBVIEW2_PREFERRED_COLOR_SCHEME_DARK,
+    };
+    let result = unsafe {
+        platform
+            .controller()
+            .CoreWebView2()
+            .and_then(|w| w.cast::<ICoreWebView2_13>())
+            .and_then(|w| w.Profile())
+            .and_then(|p| p.SetPreferredColorScheme(scheme))
+    };
+    if let Err(e) = result {
+        eprintln!("[pulpo] no se pudo fijar el tema en WebView2: {e}");
     }
 }
 

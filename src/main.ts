@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 import { applyI18n, currentLanguage, type Language, LANGUAGES, setLanguage, t, tError } from "./i18n";
+import { currentTheme, setTheme, THEMES } from "./theme";
 
 interface Service {
   id: string;
@@ -14,7 +15,12 @@ interface Service {
   adblock: boolean;
   enabled: boolean;
   dnd?: Dnd;
+  /// Tema que la app ve como preferido (como `services::Theme`).
+  theme?: AppTheme;
 }
+
+type AppTheme = "auto" | "light" | "dark";
+const APP_THEMES: AppTheme[] = ["auto", "light", "dark"];
 
 /// No molestar: horarios semanales y silencio manual (como en `services.rs`).
 interface Dnd {
@@ -61,6 +67,9 @@ const views = {
   switcher: $("#switcher-view"),
   update: $("#update-view"),
   ci: $("#ci-view"),
+  wallpaper: $("#wallpaper-view"),
+  ciSetup: $("#ci-setup-view"),
+  ciToken: $<HTMLFormElement>("#ci-token-view"),
 };
 const form = {
   title: $("#form-title"),
@@ -113,7 +122,7 @@ function select(id: string) {
   recent = [id, ...recent.filter((x) => x !== id)];
   markCurrent();
   invoke("activate_service", { id }).catch(console.error);
-  showBase();
+  showBase(true);
 }
 
 /// Ctrl Ctrl: alterna entre las dos últimas apps (desde la página inicial,
@@ -134,7 +143,7 @@ function goHome() {
   active = null;
   markCurrent();
   invoke("show_home").catch(console.error);
-  showBase();
+  showBase(true);
 }
 
 type View = keyof typeof views;
@@ -159,10 +168,15 @@ function renderBase(view: View) {
 }
 
 /// Pone la vista base al día, salvo que haya un diálogo abierto (al cerrarlo
-/// se vuelve a ella).
-function showBase() {
-  const current = overlay.hidden ? null : currentView();
-  if (current !== null && !isBase(current)) return;
+/// se vuelve a ella). `leave`: el usuario fue a otra app o a la página
+/// inicial, así que el diálogo se cierra (menos la actualización descargándose).
+function showBase(leave = false) {
+  let current = overlay.hidden ? null : currentView();
+  if (current !== null && !isBase(current)) {
+    if (!leave || (updating && current === "update")) return;
+    editing = removing = returnTo = null;
+    current = "home";
+  }
   const base = baseView();
   if (base) {
     renderBase(base);
@@ -391,11 +405,20 @@ function syncHomePane() {
   invoke("set_home_pane_visible", { visible }).catch(console.error);
 }
 
+/// Modales de CI: se abren encima de la página de CI, que sigue visible.
+const isCiModal = (v: View | null) => v === "ciSetup" || v === "ciToken";
+
 function openOverlay(view: View) {
-  for (const [name, el] of Object.entries(views)) el.hidden = name !== view;
+  for (const [name, el] of Object.entries(views)) {
+    el.hidden = name !== view && !(name === "ci" && isCiModal(view));
+  }
   if (!overlay.hidden) syncHomePane();
   overlay.classList.toggle("menu-mode", view === "menu");
   overlay.classList.toggle("home-mode", view === "home");
+  overlay.classList.toggle("wallpaper-mode", view === "wallpaper");
+  // Páginas completas (CI, fondo de pantalla), no tarjetas.
+  overlay.classList.toggle("page-mode", view === "ci" || isCiModal(view));
+  overlay.classList.toggle("ci-modal-open", isCiModal(view));
   if (!overlay.hidden) return;
   invoke("set_overlay", { open: true })
     .catch(console.error)
@@ -424,6 +447,8 @@ function closeOverlay() {
   if (updating && currentView() === "update") return;
   const current = currentView();
   editing = removing = null;
+  // Añadir token vuelve a la configuración, que se rehace con lo nuevo.
+  if (current === "ciToken") return openCiSetup();
   if (returnTo && returnTo !== current) {
     const back = returnTo;
     returnTo = null;
@@ -443,7 +468,8 @@ function closeOverlay() {
 }
 
 function currentView(): View | null {
-  for (const [name, el] of Object.entries(views)) {
+  // Al revés: con un modal de CI abierto, la página de CI también se ve.
+  for (const [name, el] of Object.entries(views).reverse()) {
     if (!el.hidden) return name as View;
   }
   return null;
@@ -595,6 +621,7 @@ function openMenu(s: Service, top: number, left?: number) {
           url: s.url,
           adblock: !s.adblock,
           group: s.group ?? null,
+          theme: s.theme ?? "auto",
         }).catch(
           console.error,
         ),
@@ -809,6 +836,27 @@ interface FormInit {
   icon?: string | null;
   icon_source?: IconSource;
   dnd?: Dnd;
+  theme?: AppTheme;
+}
+
+let formTheme: AppTheme = "auto";
+
+function renderFormTheme() {
+  $("#f-theme").replaceChildren(
+    ...APP_THEMES.map((value) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.role = "radio";
+      b.className = "ghost-btn";
+      b.textContent = t(`form.theme.${value}`);
+      b.setAttribute("aria-checked", String(value === formTheme));
+      b.addEventListener("click", () => {
+        formTheme = value;
+        renderFormTheme();
+      });
+      return b;
+    }),
+  );
 }
 
 // Sugerencias del campo de grupo: los grupos que ya existen y contienen lo escrito.
@@ -891,6 +939,8 @@ function openForm(init: FormInit, edit: string | null) {
   formColor = init.color ?? "#8e4ec6";
   formSchedules = structuredClone(init.dnd?.schedules ?? []);
   renderSchedules();
+  formTheme = init.theme ?? "auto";
+  renderFormTheme();
   iconChoice = { source: init.icon_source ?? "web", icon: init.icon ?? null };
   renderIconPreview();
   form.error.textContent = "";
@@ -1070,6 +1120,7 @@ views.form.addEventListener("submit", async (e) => {
     url: form.url.value,
     adblock: form.adblock.checked,
     group: form.group.value.trim() || null,
+    theme: formTheme,
   };
   form.submit.disabled = true;
   try {
@@ -1363,16 +1414,42 @@ function renderLanguages() {
   );
 }
 
+const themeButtons = $("#theme");
+
+function renderThemes() {
+  themeButtons.replaceChildren(
+    ...THEMES.map((value) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.role = "radio";
+      b.className = "ghost-btn";
+      b.textContent = t(`manage.theme.${value}`);
+      b.setAttribute("aria-checked", String(value === currentTheme()));
+      b.addEventListener("click", () => {
+        setTheme(value);
+        renderThemes();
+      });
+      return b;
+    }),
+  );
+}
+
+/// Menú del icono de la bandeja (Windows) en el idioma de la interfaz.
+const sendTrayTexts = () =>
+  invoke("set_tray_texts", { show: t("tray.show"), quit: t("tray.quit") }).catch(console.error);
+
 function changeLanguage(lang: Language) {
   setLanguage(lang);
+  sendTrayTexts();
   renderLanguages();
+  renderThemes();
   // Los textos que se pintan desde aquí se rehacen con el idioma nuevo.
   renderSidebar();
   renderManage();
   renderCi();
-  renderCiAccounts();
-  renderCiRepos();
-  $("#ci-setup-toggle").textContent = t(ci.setup.hidden ? "ci.setup" : "ci.setupDone");
+  renderCiTree();
+  if (!ci.tokenBox.hidden) renderTokenRepos();
+  renderSortings();
   const base = baseView();
   if (base) renderBase(base);
   showStatus(lastStatus);
@@ -1380,7 +1457,9 @@ function changeLanguage(lang: Language) {
 }
 
 renderLanguages();
+renderThemes();
 applyI18n();
+sendTrayTexts();
 
 homeApp = await invoke<string | null>("get_home_app");
 applyPaneSize(await invoke<number>("get_home_pane_size"));
@@ -1527,7 +1606,13 @@ interface CiRun {
 }
 
 interface CiAccount {
+  /// Una cuenta por token (varios tokens pueden tener el mismo login).
+  id: string;
   login: string;
+  /// Dueños de los repos a los que llega el token.
+  owners: string[];
+  /// Nombre que le dio el usuario.
+  name: string | null;
   valid: boolean;
 }
 
@@ -1542,13 +1627,18 @@ const ci = {
   button: $("#ci"),
   runs: $("#ci-runs"),
   empty: $("#ci-empty"),
-  setup: $("#ci-setup"),
-  accounts: $("#ci-accounts"),
-  tokenForm: $<HTMLFormElement>("#ci-token-form"),
-  token: $<HTMLInputElement>("#ci-token"),
+  tree: $("#ci-tree"),
   error: $("#ci-error"),
   repoSearch: $<HTMLInputElement>("#ci-repo-search"),
-  repos: $("#ci-repos"),
+  token: $<HTMLInputElement>("#ci-token"),
+  tokenName: $<HTMLInputElement>("#ci-token-name"),
+  tokenCheck: $<HTMLButtonElement>("#ci-token-check"),
+  tokenBox: $("#ci-token-box"),
+  tokenLogin: $("#ci-token-login"),
+  tokenSearch: $<HTMLInputElement>("#ci-token-search"),
+  tokenRepos: $("#ci-token-repos"),
+  tokenError: $("#ci-token-error"),
+  tokenOk: $<HTMLButtonElement>("#ci-token-ok"),
 };
 let ciRuns: CiRun[] = [];
 let ciAccounts: CiAccount[] = [];
@@ -1655,13 +1745,49 @@ setInterval(() => {
   }
 }, 1000);
 
-function renderCiAccounts() {
-  ci.accounts.replaceChildren(
+function repoLabel(r: CiRepo, onChange: (checked: boolean) => void): HTMLLabelElement {
+  const label = document.createElement("label");
+  label.className = "check";
+  const box = document.createElement("input");
+  box.type = "checkbox";
+  box.checked = r.watched;
+  box.addEventListener("change", () => onChange(box.checked));
+  const name = document.createElement("span");
+  name.textContent = r.repo;
+  if (r.private) {
+    const small = document.createElement("small");
+    small.textContent = ` · ${t("ci.private")}`;
+    name.append(small);
+  }
+  label.append(box, name);
+  return label;
+}
+
+/// Configuración: cada token con sus repos debajo, para marcarlos o quitar el
+/// token. Un repo se vigila con un solo token: marcarlo bajo otro lo mueve.
+function renderCiTree() {
+  const query = ci.repoSearch.value.trim().toLowerCase();
+  if (!ciAccounts.length) {
+    ci.tree.textContent = t("ci.noAccounts");
+    return;
+  }
+  ci.tree.replaceChildren(
     ...ciAccounts.map((a) => {
-      const row = document.createElement("div");
-      row.className = "ci-account";
+      const group = document.createElement("div");
+      group.className = "ci-tree-account";
+      const head = document.createElement("div");
+      head.className = "ci-account";
       const name = document.createElement("span");
-      name.textContent = a.login;
+      const title = document.createElement("strong");
+      title.textContent = a.name ?? a.login;
+      const detail = document.createElement("small");
+      // Los dueños, si no es solo el propio usuario.
+      const owners = a.owners.length === 1 && a.owners[0] === a.login ? "" : a.owners.join(", ");
+      detail.textContent = [a.name ? a.login : null, owners]
+        .filter(Boolean)
+        .map((x) => ` · ${x}`)
+        .join("");
+      name.append(title, detail);
       if (!a.valid) {
         const warn = document.createElement("small");
         warn.className = "warn";
@@ -1673,51 +1799,38 @@ function renderCiAccounts() {
       remove.className = "ghost-btn";
       remove.textContent = t("ci.remove");
       remove.addEventListener("click", () => {
-        invoke("ci_remove_account", { login: a.login })
+        invoke("ci_remove_account", { id: a.id })
           .then(() => loadCiRepos())
           .catch((e) => (ci.error.textContent = tError(e)));
       });
-      row.append(name, remove);
-      return row;
-    }),
-  );
-}
-
-function renderCiRepos() {
-  if (ciReposLoading && !ciRepos) {
-    ci.repos.textContent = t("ci.reposLoading");
-    return;
-  }
-  const query = ci.repoSearch.value.trim().toLowerCase();
-  const repos = (ciRepos ?? []).filter((r) => r.repo.toLowerCase().includes(query));
-  if (!repos.length) {
-    ci.repos.textContent = ciAccounts.length ? t("ci.reposEmpty") : "";
-    return;
-  }
-  ci.repos.replaceChildren(
-    ...repos.map((r) => {
-      const label = document.createElement("label");
-      label.className = "check";
-      const box = document.createElement("input");
-      box.type = "checkbox";
-      box.checked = r.watched;
-      box.addEventListener("change", () => {
-        r.watched = box.checked;
-        const repos = (ciRepos ?? [])
-          .filter((x) => x.watched)
-          .map(({ repo, account }) => ({ repo, account }));
-        invoke("ci_set_repos", { repos }).catch(console.error);
-        renderCi();
-      });
-      const name = document.createElement("span");
-      name.textContent = r.repo;
-      if (r.private) {
-        const small = document.createElement("small");
-        small.textContent = ` · ${t("ci.private")}`;
-        name.append(small);
+      head.append(name, remove);
+      const list = document.createElement("div");
+      list.className = "ci-tree-repos";
+      if (ciRepos === null) {
+        list.textContent = ciReposLoading ? t("ci.reposLoading") : "";
+      } else {
+        const repos = ciRepos.filter(
+          (r) => r.account === a.id && r.repo.toLowerCase().includes(query),
+        );
+        if (!repos.length) list.textContent = t("ci.reposEmpty");
+        list.append(
+          ...repos.map((r) =>
+            repoLabel(r, (checked) => {
+              for (const x of ciRepos ?? []) {
+                if (x.repo === r.repo) x.watched = checked && x.account === a.id;
+              }
+              const watched = (ciRepos ?? [])
+                .filter((x) => x.watched)
+                .map(({ repo, account }) => ({ repo, account }));
+              invoke("ci_set_repos", { repos: watched }).catch(console.error);
+              renderCiTree();
+              renderCi();
+            }),
+          ),
+        );
       }
-      label.append(box, name);
-      return label;
+      group.append(head, list);
+      return group;
     }),
   );
 }
@@ -1725,11 +1838,12 @@ function renderCiRepos() {
 function loadCiRepos() {
   if (!ciAccounts.length) {
     ciRepos = [];
-    renderCiRepos();
+    renderCiTree();
     return;
   }
+  ciRepos = null;
   ciReposLoading = true;
-  renderCiRepos();
+  renderCiTree();
   invoke<CiRepo[]>("ci_list_repos")
     .then((repos) => {
       ciRepos = repos;
@@ -1738,39 +1852,99 @@ function loadCiRepos() {
     .catch((e) => (ci.error.textContent = tError(e)))
     .finally(() => {
       ciReposLoading = false;
-      renderCiRepos();
+      renderCiTree();
       renderCi();
     });
 }
 
-function showCiSetup(show: boolean) {
-  ci.setup.hidden = !show;
-  $("#ci-setup-toggle").textContent = t(show ? "ci.setupDone" : "ci.setup");
-  if (show) {
-    renderCiAccounts();
-    if (ciRepos === null) loadCiRepos();
-    else renderCiRepos();
-  }
+/// Configuración (tokens y repos), en un modal encima de la página de CI: al
+/// cerrarse vuelve a ella.
+function openCiSetup() {
+  ci.error.textContent = "";
+  loadCiRepos();
+  returnTo = "ci";
+  openOverlay("ciSetup");
+}
+
+// ------------------------------------------------ añadir token
+
+/// Token comprobado (sus repos están en la lista) y sus repos.
+let checkedToken: string | null = null;
+let tokenRepos: CiRepo[] = [];
+
+function renderTokenRepos() {
+  const query = ci.tokenSearch.value.trim().toLowerCase();
+  const repos = tokenRepos.filter((r) => r.repo.toLowerCase().includes(query));
+  ci.tokenRepos.replaceChildren(
+    ...repos.map((r) => repoLabel(r, (checked) => (r.watched = checked))),
+  );
+  if (!tokenRepos.length) ci.tokenRepos.textContent = t("ci.reposEmpty");
+}
+
+function openCiToken() {
+  checkedToken = null;
+  tokenRepos = [];
+  ci.token.value = "";
+  ci.tokenName.value = "";
+  ci.tokenSearch.value = "";
+  ci.tokenBox.hidden = true;
+  ci.tokenError.textContent = "";
+  ci.tokenOk.disabled = true;
+  openOverlay("ciToken");
+  ci.tokenName.focus();
+}
+
+function checkToken() {
+  const token = ci.token.value.trim();
+  ci.tokenError.textContent = "";
+  ci.tokenCheck.disabled = true;
+  ci.tokenCheck.textContent = t("ci.checking");
+  invoke<{ login: string; repos: CiRepo[] }>("ci_check_token", { token })
+    .then(({ login, repos }) => {
+      checkedToken = token;
+      tokenRepos = repos;
+      ci.tokenLogin.textContent = t("ci.tokenRepos", { login });
+      ci.tokenBox.hidden = false;
+      ci.tokenOk.disabled = false;
+      renderTokenRepos();
+    })
+    .catch((e) => (ci.tokenError.textContent = tError(e)))
+    .finally(() => {
+      ci.tokenCheck.disabled = false;
+      ci.tokenCheck.textContent = t("ci.check");
+    });
 }
 
 ci.button.addEventListener("click", () => {
   renderCi();
-  ci.error.textContent = "";
-  showCiSetup(!ciAccounts.length);
   openOverlay("ci");
+  // Sin tokens no hay nada que ver: directo a la configuración.
+  if (!ciAccounts.length) openCiSetup();
 });
-$("#ci-setup-toggle").addEventListener("click", () => showCiSetup(ci.setup.hidden));
-ci.repoSearch.addEventListener("input", renderCiRepos);
-ci.tokenForm.addEventListener("submit", (e) => {
+$("#ci-setup-open").addEventListener("click", openCiSetup);
+$("#ci-token-open").addEventListener("click", openCiToken);
+ci.repoSearch.addEventListener("input", renderCiTree);
+ci.tokenSearch.addEventListener("input", renderTokenRepos);
+ci.tokenCheck.addEventListener("click", checkToken);
+// Otro token: hay que volver a comprobarlo.
+ci.token.addEventListener("input", () => {
+  if (checkedToken === null) return;
+  checkedToken = null;
+  ci.tokenBox.hidden = true;
+  ci.tokenOk.disabled = true;
+});
+views.ciToken.addEventListener("submit", (e) => {
   e.preventDefault();
-  ci.error.textContent = "";
-  const token = ci.token.value;
-  invoke<string>("ci_add_token", { token })
-    .then(() => {
-      ci.token.value = "";
-      loadCiRepos();
-    })
-    .catch((err) => (ci.error.textContent = tError(err)));
+  // Enter sin comprobar: comprueba.
+  if (checkedToken === null) return checkToken();
+  ci.tokenOk.disabled = true;
+  const repos = tokenRepos.filter((r) => r.watched).map((r) => r.repo);
+  invoke<string>("ci_add_token", { token: checkedToken, name: ci.tokenName.value, repos })
+    .then(() => openCiSetup())
+    .catch((err) => {
+      ci.tokenError.textContent = tError(err);
+      ci.tokenOk.disabled = false;
+    });
 });
 // Enlaces de la ayuda: al navegador del sistema (la barra lateral no navega).
 overlay.addEventListener("click", (e) => {
@@ -1800,7 +1974,7 @@ await listen<CiRun[]>("ci-changed", ({ payload }) => {
 });
 await listen<CiAccount[]>("ci-accounts", ({ payload }) => {
   ciAccounts = payload;
-  renderCiAccounts();
+  renderCiTree();
   renderCi();
 });
 // Un run terminó: aviso del sistema (clic: el run en el navegador).
@@ -1813,6 +1987,211 @@ await listen<CiRun>("ci-finished", ({ payload: r }) => {
     url: r.url,
   }).catch(console.error);
 });
+
+// ---------------------------------------------------------------- fondo de pantalla
+
+interface SavedWallpaper {
+  name: string;
+  data: string;
+  current: boolean;
+}
+
+interface FoundWallpaper {
+  id: string;
+  thumb: string;
+  full: string;
+  resolution: string;
+}
+
+const wp = {
+  error: $("#wallpaper-error"),
+  saved: $("#wallpaper-saved"),
+  results: $("#wallpaper-results"),
+  query: $<HTMLInputElement>("#wallpaper-query"),
+  sorting: $("#wallpaper-sorting"),
+  more: $<HTMLButtonElement>("#wallpaper-more"),
+  file: $<HTMLInputElement>("#wallpaper-file"),
+};
+const SORTINGS = ["toplist", "random", "date_added"] as const;
+let wpSorting: (typeof SORTINGS)[number] = "toplist";
+let wpPage = 0;
+let wpLastPage = 1;
+/// Cada búsqueda nueva invalida las respuestas de las anteriores.
+let wpSearch = 0;
+
+/// URL `blob:` del fondo activo: la imagen en base64 (varios MB) no cabe en
+/// una variable CSS, Chromium la descarta.
+let wallpaperUrl: string | null = null;
+
+/// El fondo activo detrás de la página inicial.
+async function applyWallpaper() {
+  const data = await invoke<string | null>("wallpaper_get").catch(() => null);
+  const blob = data ? await (await fetch(data)).blob().catch(() => null) : null;
+  if (wallpaperUrl) URL.revokeObjectURL(wallpaperUrl);
+  wallpaperUrl = blob ? URL.createObjectURL(blob) : null;
+  document.body.classList.toggle("has-wallpaper", wallpaperUrl !== null);
+  if (wallpaperUrl) document.body.style.setProperty("--wallpaper", `url("${wallpaperUrl}")`);
+  else document.body.style.removeProperty("--wallpaper");
+}
+
+function wallpaperTile(src: string, label: string | null): HTMLDivElement {
+  const tile = document.createElement("div");
+  tile.className = "wallpaper-tile";
+  tile.tabIndex = 0;
+  tile.role = "button";
+  const img = document.createElement("img");
+  img.src = src;
+  img.loading = "lazy";
+  img.alt = "";
+  tile.append(img);
+  if (label) {
+    const small = document.createElement("small");
+    small.textContent = label;
+    tile.append(small);
+  }
+  tile.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" || e.key === " ") {
+      e.preventDefault();
+      tile.click();
+    }
+  });
+  return tile;
+}
+
+const wpFail = (e: unknown) => (wp.error.textContent = tError(e));
+
+/// Aviso breve abajo de la página del fondo ("Fondo aplicado").
+let wpToastTimer: number | undefined;
+function wpToast(key: "wallpaper.applied" | "wallpaper.removed") {
+  const toast = $("#wallpaper-toast");
+  toast.textContent = t(key);
+  toast.classList.add("show");
+  clearTimeout(wpToastTimer);
+  wpToastTimer = window.setTimeout(() => toast.classList.remove("show"), 2000);
+}
+const wpApplied = () => {
+  wp.error.textContent = "";
+  wpToast("wallpaper.applied");
+};
+
+function loadSavedWallpapers() {
+  invoke<SavedWallpaper[]>("wallpaper_list")
+    .then((list) =>
+      wp.saved.replaceChildren(
+        ...list.map((w) => {
+          const tile = wallpaperTile(w.data, null);
+          tile.setAttribute("aria-current", String(w.current));
+          tile.addEventListener("click", () =>
+            invoke("wallpaper_use", { name: w.name }).then(wpApplied, wpFail),
+          );
+          const remove = document.createElement("button");
+          remove.type = "button";
+          remove.className = "remove";
+          remove.textContent = "✕";
+          remove.title = t("wallpaper.delete");
+          remove.addEventListener("click", (e) => {
+            e.stopPropagation();
+            invoke("wallpaper_delete", { name: w.name }).catch(wpFail);
+          });
+          tile.append(remove);
+          return tile;
+        }),
+      ),
+    )
+    .catch(wpFail);
+}
+
+function searchWallpapers(reset: boolean) {
+  if (reset) {
+    wpPage = 0;
+    wp.results.replaceChildren();
+  }
+  const search = ++wpSearch;
+  wp.more.hidden = true;
+  invoke<{ items: FoundWallpaper[]; last_page: number }>("wallpaper_search", {
+    query: wp.query.value,
+    sorting: wpSorting,
+    page: wpPage + 1,
+  })
+    .then(({ items, last_page }) => {
+      if (search !== wpSearch) return;
+      wpPage += 1;
+      wpLastPage = last_page;
+      wp.error.textContent = "";
+      wp.results.append(
+        ...items.map((w) => {
+          const tile = wallpaperTile(w.thumb, w.resolution);
+          tile.addEventListener("click", () => {
+            if (tile.classList.contains("busy")) return;
+            tile.classList.add("busy");
+            invoke("wallpaper_download", { id: w.id, url: w.full })
+              .then(wpApplied, wpFail)
+              .finally(() => tile.classList.remove("busy"));
+          });
+          return tile;
+        }),
+      );
+      wp.more.hidden = wpPage >= wpLastPage;
+    })
+    .catch((e) => search === wpSearch && wpFail(e));
+}
+
+function renderSortings() {
+  wp.sorting.replaceChildren(
+    ...SORTINGS.map((value) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.role = "radio";
+      b.className = "ghost-btn";
+      b.textContent = t(`wallpaper.sort.${value}`);
+      b.setAttribute("aria-checked", String(value === wpSorting));
+      b.addEventListener("click", () => {
+        wpSorting = value;
+        renderSortings();
+        searchWallpapers(true);
+      });
+      return b;
+    }),
+  );
+}
+
+// Desde Gestionar apps; al cerrarse vuelve a él.
+$("#wallpaper-open").addEventListener("click", () => {
+  wp.error.textContent = "";
+  renderSortings();
+  loadSavedWallpapers();
+  if (!wp.results.childElementCount) searchWallpapers(true);
+  returnTo = "manage";
+  openOverlay("wallpaper");
+});
+$("#wallpaper-own").addEventListener("click", () => wp.file.click());
+$("#wallpaper-none").addEventListener("click", () =>
+  invoke("wallpaper_use", { name: null })
+    .then(() => wpToast("wallpaper.removed"))
+    .catch(wpFail),
+);
+wp.more.addEventListener("click", () => searchWallpapers(false));
+let wpQueryTimer: number | undefined;
+wp.query.addEventListener("input", () => {
+  clearTimeout(wpQueryTimer);
+  wpQueryTimer = window.setTimeout(() => searchWallpapers(true), 500);
+});
+wp.file.addEventListener("change", () => {
+  const file = wp.file.files?.[0];
+  wp.file.value = "";
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    const data = String(reader.result).split(",", 2)[1] ?? "";
+    invoke("wallpaper_import", { name: file.name, data }).then(wpApplied, wpFail);
+  };
+  reader.readAsDataURL(file);
+});
+await listen("wallpaper-changed", () => {
+  applyWallpaper();
+  if (currentView() === "wallpaper") loadSavedWallpapers();
+});
+applyWallpaper();
 
 // ---------------------------------------------------------------- tamaño
 

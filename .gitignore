@@ -3,5 +3,6 @@ dist/
 src-tauri/target/
 src-tauri/gen/schemas/
 *.local
+.dev-data/
 .DS_Store
 cef-*-codecs-*.tar.zst

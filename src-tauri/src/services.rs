@@ -29,6 +29,27 @@ pub struct Service {
     /// silenciada a mano. Los contadores siguen.
     #[serde(default, skip_serializing_if = "Dnd::is_empty")]
     pub dnd: Dnd,
+    /// Tema que la app ve como preferido (`prefers-color-scheme`).
+    #[serde(default, skip_serializing_if = "Theme::is_auto")]
+    pub theme: Theme,
+}
+
+/// Tema preferido que se le dice a una app. Las que siguen el del navegador
+/// (`prefers-color-scheme`) lo usan; las que no, siguen igual.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum Theme {
+    /// El del navegador (el del sistema).
+    #[default]
+    Auto,
+    Light,
+    Dark,
+}
+
+impl Theme {
+    pub fn is_auto(&self) -> bool {
+        *self == Theme::Auto
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -182,6 +203,7 @@ fn defaults() -> Vec<Service> {
             adblock: false,
             enabled: true,
             dnd: Dnd::default(),
+            theme: Theme::Auto,
         },
         Service {
             id: "ytmusic".into(),
@@ -194,6 +216,7 @@ fn defaults() -> Vec<Service> {
             adblock: true,
             enabled: true,
             dnd: Dnd::default(),
+            theme: Theme::Auto,
         },
     ]
 }

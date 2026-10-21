@@ -12,7 +12,12 @@
         <img src="/pulpo.svg" alt="" draggable="false" />
       </button>
       <nav id="services" data-i18n-label="sidebar.services"></nav>
-      <button id="add" type="button" data-i18n-title="sidebar.add" data-i18n-label="sidebar.add">+</button>
+      <button id="add" type="button" data-i18n-title="sidebar.add" data-i18n-label="sidebar.add">
+        <!-- SVG y no el carácter "+": el glifo queda descentrado según la fuente. -->
+        <svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true">
+          <path d="M9 2v14M2 9h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+        </svg>
+      </button>
       <button id="ci" type="button" hidden data-i18n-title="sidebar.ci" data-i18n-label="sidebar.ci">
         <span class="ci-label">CI</span>
         <span class="badge"></span>
@@ -96,33 +101,87 @@
           <!-- Botones y no <select>: su lista nativa se cierra sola dentro del webview. -->
           <div id="language" class="segmented" role="radiogroup"></div>
         </div>
+        <div class="zoom-row">
+          <span data-i18n="manage.theme"></span>
+          <div id="theme" class="segmented" role="radiogroup"></div>
+        </div>
+        <div class="zoom-row">
+          <span data-i18n="wallpaper.title"></span>
+          <button type="button" class="ghost-btn" id="wallpaper-open" data-i18n="wallpaper.choose"></button>
+        </div>
         <p class="hint" data-i18n="manage.hint"></p>
       </section>
 
-      <section class="card" id="ci-view" hidden>
+      <!-- CI ocupa el área de las apps, como una más. Sus modales van encima. -->
+      <section id="ci-view" class="page-view" hidden>
         <header>
           <h2 data-i18n="ci.title"></h2>
-          <button type="button" class="ghost-btn" id="ci-setup-toggle" data-i18n="ci.setup"></button>
-          <button type="button" class="ghost-btn" data-close data-i18n="manage.close"></button>
+          <button type="button" class="ghost-btn" id="ci-setup-open" data-i18n="ci.setup"></button>
         </header>
         <ul id="ci-runs"></ul>
         <p id="ci-empty" class="hint"></p>
-        <div id="ci-setup" class="links-box" hidden>
-          <div class="links-head"><span data-i18n="ci.accounts"></span></div>
-          <div id="ci-accounts"></div>
-          <form id="ci-token-form" class="link-row" autocomplete="off">
-            <input id="ci-token" type="password" data-i18n-placeholder="ci.tokenPlaceholder" />
-            <button type="submit" class="ghost-btn" data-i18n="ci.addToken"></button>
-          </form>
-          <small class="hint" data-i18n-html="ci.tokenHint"></small>
-          <p id="ci-error" class="error" role="alert"></p>
-          <div class="links-head">
-            <span data-i18n="ci.repos"></span>
-            <input id="ci-repo-search" type="search" data-i18n-placeholder="ci.repoSearch" autocomplete="off" />
-          </div>
-          <div id="ci-repos"></div>
-        </div>
       </section>
+
+      <!-- Fondo de la página inicial: página completa; arriba fijo, abajo los
+           resultados con scroll. -->
+      <section id="wallpaper-view" hidden>
+        <header>
+          <h2 data-i18n="wallpaper.title"></h2>
+          <button type="button" class="ghost-btn" id="wallpaper-own" data-i18n="wallpaper.own"></button>
+          <button type="button" class="ghost-btn" id="wallpaper-none" data-i18n="wallpaper.none"></button>
+          <button type="button" class="ghost-btn" data-close data-i18n="manage.close"></button>
+          <input id="wallpaper-file" type="file" accept="image/jpeg,image/png,image/webp" hidden />
+        </header>
+        <p id="wallpaper-error" class="error" role="alert"></p>
+        <h3 data-i18n="wallpaper.saved"></h3>
+        <div id="wallpaper-saved"></div>
+        <div class="wallpaper-search">
+          <h3>Wallhaven</h3>
+          <input id="wallpaper-query" type="search" data-i18n-placeholder="wallpaper.search" autocomplete="off" />
+          <div id="wallpaper-sorting" class="segmented" role="radiogroup"></div>
+        </div>
+        <!-- Solo los resultados se desplazan: lo de arriba queda fijo. -->
+        <div id="wallpaper-scroll">
+          <div class="wallpaper-grid" id="wallpaper-results"></div>
+          <button type="button" class="ghost-btn" id="wallpaper-more" data-i18n="wallpaper.more" hidden></button>
+        </div>
+        <div id="wallpaper-toast" role="status" aria-live="polite"></div>
+      </section>
+
+      <section class="card ci-modal" id="ci-setup-view" hidden>
+        <header>
+          <h2 data-i18n="ci.setupTitle"></h2>
+          <input id="ci-repo-search" type="search" data-i18n-placeholder="ci.repoSearch" autocomplete="off" />
+        </header>
+        <div id="ci-tree"></div>
+        <p id="ci-error" class="error" role="alert"></p>
+        <footer>
+          <button type="button" class="ghost" id="ci-token-open" data-i18n="ci.addTokenButton"></button>
+          <button type="button" data-close data-i18n="ci.setupDone"></button>
+        </footer>
+      </section>
+
+      <form class="card ci-modal" id="ci-token-view" hidden autocomplete="off">
+        <h2 data-i18n="ci.addTokenTitle"></h2>
+        <input id="ci-token-name" type="text" data-i18n-placeholder="ci.tokenName" />
+        <div class="link-row">
+          <input id="ci-token" type="password" data-i18n-placeholder="ci.tokenPlaceholder" />
+          <button type="button" class="ghost-btn" id="ci-token-check" data-i18n="ci.check"></button>
+        </div>
+        <small class="hint" data-i18n-html="ci.tokenHint"></small>
+        <div class="links-box" id="ci-token-box" hidden>
+          <div class="links-head">
+            <span id="ci-token-login"></span>
+            <input id="ci-token-search" type="search" data-i18n-placeholder="ci.repoSearch" autocomplete="off" />
+          </div>
+          <div id="ci-token-repos"></div>
+        </div>
+        <p id="ci-token-error" class="error" role="alert"></p>
+        <footer>
+          <button type="button" class="ghost" data-close data-i18n="action.cancel"></button>
+          <button type="submit" id="ci-token-ok" data-i18n="ci.addToken" disabled></button>
+        </footer>
+      </form>
 
       <form class="card" id="form-view" hidden autocomplete="off">
         <h2 id="form-title"></h2>
@@ -157,6 +216,11 @@
             <small data-i18n="form.adblockHint"></small>
           </span>
         </label>
+        <div class="field">
+          <span class="field-label" data-i18n="form.theme"></span>
+          <div id="f-theme" class="segmented" role="radiogroup"></div>
+          <small class="dnd-hint" data-i18n="form.themeHint"></small>
+        </div>
         <div class="field">
           <span class="field-label" data-i18n="dnd.title"></span>
           <div id="f-dnd-list"></div>
