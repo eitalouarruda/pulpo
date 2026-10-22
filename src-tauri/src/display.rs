@@ -41,6 +41,9 @@ pub struct Settings {
     /// Cuentas de GitHub y repos vigilados en la vista CI (los tokens van al llavero).
     #[serde(default, skip_serializing_if = "crate::ci::CiSettings::is_empty")]
     pub ci: crate::ci::CiSettings,
+    /// Botón de Bitwarden y Ctrl+Mayús+L (ver `bitwarden`).
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub bitwarden: bool,
     /// Fondo de la página inicial: un archivo de `<datos>/wallpapers`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wallpaper: Option<String>,

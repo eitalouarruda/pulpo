@@ -443,22 +443,6 @@ label.check small {
   user-select: none;
 }
 
-/* Colocado con coordenadas de la ventana (getBoundingClientRect). */
-.context-menu.floating {
-  position: fixed;
-  z-index: 10;
-}
-
-#vpn-menu input {
-  width: 100%;
-  margin-bottom: 6px;
-}
-
-#vpn-list {
-  max-height: 280px;
-  overflow-y: auto;
-}
-
 .context-menu[hidden] {
   display: none;
 }
@@ -725,6 +709,66 @@ label.check small {
 
 #ci[data-state="ok"] {
   color: var(--ok);
+}
+
+#vault {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 40px;
+  height: 28px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+#vault[hidden] {
+  display: none;
+}
+
+#vault:hover,
+#vault:focus-visible {
+  color: var(--fg);
+}
+
+#vault-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  max-height: 50vh;
+  overflow-y: auto;
+}
+
+#vault-password[hidden],
+#vault-view footer button[hidden],
+#vault-list[hidden] {
+  display: none;
+}
+
+.vault-entry {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: none;
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+}
+
+.vault-entry:hover,
+.vault-entry:focus-visible {
+  border-color: var(--muted);
+}
+
+.vault-entry span {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 #ci .badge {

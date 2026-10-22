@@ -18,8 +18,6 @@ interface Service {
   dnd?: Dnd;
   /// Tema que la app ve como preferido (como `services::Theme`).
   theme?: AppTheme;
-  /// País por el que sale con la VPN (ISO de dos letras), como `Service::vpn`.
-  vpn?: string | null;
 }
 
 type AppTheme = "auto" | "light" | "dark";
@@ -73,6 +71,7 @@ const views = {
   wallpaper: $("#wallpaper-view"),
   ciSetup: $("#ci-setup-view"),
   ciToken: $<HTMLFormElement>("#ci-token-view"),
+  vault: $<HTMLFormElement>("#vault-view"),
 };
 const form = {
   title: $("#form-title"),
@@ -657,7 +656,6 @@ function openMenu(s: Service, top: number, left?: number) {
           adblock: !s.adblock,
           group: s.group ?? null,
           theme: s.theme ?? "auto",
-          vpn: s.vpn ?? null,
         }).catch(
           console.error,
         ),
@@ -873,7 +871,6 @@ interface FormInit {
   icon_source?: IconSource;
   dnd?: Dnd;
   theme?: AppTheme;
-  vpn?: string | null;
 }
 
 let formTheme: AppTheme = "auto";
@@ -895,119 +892,6 @@ function renderFormTheme() {
     }),
   );
 }
-
-/// VPN del formulario: país (ISO) o `null` para la conexión normal.
-let formVpn: string | null = null;
-/// Países con servidores gratuitos; se piden la primera vez que se abre la lista.
-let vpnCountries: string[] | null = null;
-const vpnMenu = $("#vpn-menu");
-const vpnSearch = $<HTMLInputElement>("#vpn-search");
-const vpnButton = $<HTMLButtonElement>("#f-vpn");
-
-function countryName(code: string): string {
-  try {
-    return new Intl.DisplayNames([currentLanguage()], { type: "region" }).of(code) ?? code;
-  } catch {
-    return code;
-  }
-}
-
-const vpnLabel = (code: string | null) => (code ? `${countryName(code)} (${code})` : t("form.vpnOff"));
-
-function renderFormVpn() {
-  vpnButton.textContent = vpnLabel(formVpn);
-}
-
-function renderVpnList() {
-  const item = (code: string | null) => {
-    const b = document.createElement("button");
-    b.type = "button";
-    b.role = "menuitemradio";
-    b.setAttribute("aria-checked", String(code === formVpn));
-    b.innerHTML = `<span class="mark"></span><span></span>`;
-    b.lastElementChild!.textContent = vpnLabel(code);
-    b.addEventListener("click", () => {
-      formVpn = code;
-      renderFormVpn();
-      closeVpnMenu();
-    });
-    return b;
-  };
-  const note = (text: string) => {
-    const p = document.createElement("div");
-    p.className = "menu-title";
-    p.textContent = text;
-    return p;
-  };
-  if (!vpnCountries) {
-    $("#vpn-list").replaceChildren(item(null), note(t("form.vpnLoading")));
-    return;
-  }
-  const typed = vpnSearch.value.trim().toLowerCase();
-  const codes = vpnCountries
-    .filter((c) => !typed || c.toLowerCase() === typed || countryName(c).toLowerCase().includes(typed))
-    .sort((a, b) => countryName(a).localeCompare(countryName(b), currentLanguage()));
-  $("#vpn-list").replaceChildren(item(null), document.createElement("hr"), ...codes.map(item));
-}
-
-function placeVpnMenu() {
-  const r = vpnButton.getBoundingClientRect();
-  vpnMenu.style.left = `${Math.max(8, Math.min(r.left, window.innerWidth - vpnMenu.offsetWidth - 8))}px`;
-  // Debajo del botón, o encima si no cabe.
-  const below = r.bottom + 4;
-  vpnMenu.style.top = `${below + vpnMenu.offsetHeight > window.innerHeight - 8 ? Math.max(8, r.top - vpnMenu.offsetHeight - 4) : below}px`;
-}
-
-function openVpnMenu() {
-  vpnSearch.value = "";
-  renderVpnList();
-  vpnMenu.hidden = false;
-  placeVpnMenu();
-  vpnSearch.focus();
-  if (vpnCountries) return;
-  invoke<string[]>("vpn_countries")
-    .then((list) => {
-      vpnCountries = list;
-      if (!vpnMenu.hidden) {
-        renderVpnList();
-        placeVpnMenu();
-      }
-    })
-    .catch((err) => {
-      $("#vpn-list").replaceChildren(
-        Object.assign(document.createElement("div"), { className: "menu-title", textContent: tError(err) }),
-      );
-    });
-}
-
-function closeVpnMenu() {
-  vpnMenu.hidden = true;
-}
-
-vpnButton.addEventListener("click", () => (vpnMenu.hidden ? openVpnMenu() : closeVpnMenu()));
-vpnSearch.addEventListener("input", renderVpnList);
-vpnSearch.addEventListener("keydown", (e) => {
-  if (e.key === "Enter") {
-    // Enter elige el primer país de la lista, no envía el formulario.
-    e.preventDefault();
-    $("#vpn-list").querySelectorAll<HTMLButtonElement>("button")[1]?.click();
-  }
-});
-document.addEventListener("pointerdown", (e) => {
-  const target = e.target as HTMLElement;
-  if (!vpnMenu.hidden && !vpnMenu.contains(target) && target !== vpnButton) closeVpnMenu();
-});
-// Esc con la lista abierta solo la cierra a ella, no el diálogo.
-window.addEventListener(
-  "keydown",
-  (e) => {
-    if (e.key === "Escape" && !vpnMenu.hidden) {
-      e.stopImmediatePropagation();
-      closeVpnMenu();
-    }
-  },
-  true,
-);
 
 // Sugerencias del campo de grupo: los grupos que ya existen y contienen lo escrito.
 let groupIndex = -1;
@@ -1091,8 +975,6 @@ function openForm(init: FormInit, edit: string | null) {
   renderSchedules();
   formTheme = init.theme ?? "auto";
   renderFormTheme();
-  formVpn = init.vpn ?? null;
-  renderFormVpn();
   iconChoice = { source: init.icon_source ?? "web", icon: init.icon ?? null };
   renderIconPreview();
   form.error.textContent = "";
@@ -1273,7 +1155,6 @@ views.form.addEventListener("submit", async (e) => {
     adblock: form.adblock.checked,
     group: form.group.value.trim() || null,
     theme: formTheme,
-    vpn: formVpn,
   };
   form.submit.disabled = true;
   try {
@@ -2379,6 +2260,152 @@ window.addEventListener("keydown", (e) => {
 });
 showZoom(await invoke<ZoomInfo>("get_zoom"));
 await listen<ZoomInfo>("zoom-changed", (e) => showZoom(e.payload));
+
+// ---------------------------------------------------------------- Bitwarden
+
+/// Como `bitwarden::Status`.
+interface VaultStatus {
+  state: "missing" | "unauthenticated" | "locked" | "unlocked";
+  email: string | null;
+}
+
+interface VaultEntry {
+  id: string;
+  name: string;
+  username: string;
+}
+
+const vault = {
+  button: $<HTMLButtonElement>("#vault"),
+  message: $("#vault-message"),
+  password: $<HTMLInputElement>("#vault-password"),
+  list: $("#vault-list"),
+  error: $("#vault-error"),
+  lock: $<HTMLButtonElement>("#vault-lock"),
+  unlock: $<HTMLButtonElement>("#vault-unlock"),
+};
+/// App en la que se rellena.
+let fillTarget: string | null = null;
+
+function serviceName(id: string) {
+  return services.find((s) => s.id === id)?.name ?? id;
+}
+
+/// Muestra el diálogo en uno de sus modos: un aviso, pedir la contraseña
+/// maestra o elegir entre varias entradas.
+/// `html` solo para textos fijos de i18n: los nombres de las apps van como texto.
+function showVault(mode: "message" | "unlock" | "list", message: string, html = false) {
+  if (html) vault.message.innerHTML = message;
+  else vault.message.textContent = message;
+  vault.password.hidden = vault.unlock.hidden = mode !== "unlock";
+  vault.list.hidden = mode !== "list";
+  // Bloquear solo con la bóveda abierta (la lista, o "nada para esta página").
+  vault.lock.hidden = mode !== "list";
+  vault.error.textContent = "";
+  if (mode === "unlock") vault.password.value = "";
+  if (currentView() !== "vault" || overlay.hidden) {
+    returnTo = null;
+    openOverlay("vault");
+  }
+  (mode === "unlock" ? vault.password : (vault.list.querySelector("button") as HTMLElement | null))?.focus();
+}
+
+/// Vuelve a la app con el foco en ella.
+function backToApp() {
+  if (currentView() === "vault" && !overlay.hidden) closeOverlay();
+  if (fillTarget && fillTarget === active) {
+    invoke("activate_service", { id: fillTarget }).catch(console.error);
+  }
+}
+
+async function startFill(id: string) {
+  fillTarget = id;
+  try {
+    const status = await invoke<VaultStatus>("bw_status");
+    if (status.state === "missing") return showVault("message", t("vault.missing"));
+    if (status.state === "unauthenticated") return showVault("message", t("vault.login"), true);
+    if (status.state === "locked") {
+      return showVault("unlock", t("vault.locked", { email: status.email ?? "" }));
+    }
+    await listLogins();
+  } catch (e) {
+    showVault("message", "");
+    vault.error.textContent = tError(e);
+  }
+}
+
+async function listLogins() {
+  if (!fillTarget) return;
+  const entries = await invoke<VaultEntry[]>("bw_logins", { service: fillTarget });
+  // Una sola: se rellena sin preguntar.
+  if (entries.length === 1) return fill(entries[0].id);
+  if (!entries.length) {
+    showVault("message", t("vault.none", { app: serviceName(fillTarget) }));
+    vault.lock.hidden = false;
+    return;
+  }
+  vault.list.replaceChildren(
+    ...entries.map((entry) => {
+      const b = document.createElement("button");
+      b.type = "button";
+      b.className = "vault-entry";
+      const name = document.createElement("strong");
+      name.textContent = entry.name;
+      const user = document.createElement("span");
+      user.textContent = entry.username;
+      b.append(name, user);
+      b.addEventListener("click", () => fill(entry.id));
+      return b;
+    }),
+  );
+  showVault("list", t("vault.choose", { app: serviceName(fillTarget) }));
+}
+
+async function fill(id: string) {
+  if (!fillTarget) return;
+  try {
+    await invoke("bw_fill", { service: fillTarget, id });
+    backToApp();
+  } catch (e) {
+    showVault("message", "");
+    vault.error.textContent = tError(e);
+  }
+}
+
+views.vault.addEventListener("submit", (e) => {
+  e.preventDefault();
+  if (vault.unlock.hidden) return;
+  vault.unlock.disabled = true;
+  vault.error.textContent = "";
+  invoke("bw_unlock", { password: vault.password.value })
+    .then(() => listLogins())
+    .catch((e) => {
+      vault.error.textContent = tError(e);
+      vault.password.select();
+    })
+    .finally(() => (vault.unlock.disabled = false));
+});
+vault.lock.addEventListener("click", () => {
+  invoke("bw_lock").catch(console.error);
+  closeOverlay();
+});
+vault.button.addEventListener("click", () => {
+  if (active) startFill(active);
+  else showVault("message", t("vault.noApp"));
+});
+// Ctrl+Mayús+L dentro de una app (Rust solo lo manda con Bitwarden activado).
+await listen<string>("fill-request", ({ payload }) => startFill(payload));
+
+const vaultEnabledBox = $<HTMLInputElement>("#vault-enabled");
+function showVaultEnabled(enabled: boolean) {
+  vault.button.hidden = !enabled;
+  vaultEnabledBox.checked = enabled;
+}
+vaultEnabledBox.addEventListener("change", () =>
+  invoke("bw_set_enabled", { enabled: vaultEnabledBox.checked }).catch(console.error),
+);
+showVaultEnabled(await invoke<boolean>("bw_enabled"));
+await listen<boolean>("bw-enabled", ({ payload }) => showVaultEnabled(payload));
 
 // Al final del arranque, sin esperar: GitHub puede tardar o no responder.
 invoke<{ version: string } | null>("check_update")

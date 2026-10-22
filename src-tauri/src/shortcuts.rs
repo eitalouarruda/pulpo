@@ -4,9 +4,11 @@
 //! - Ctrl dos veces (solo, sin otra tecla): la app anterior.
 //! - Ctrl+1…9: la app en esa posición de la barra lateral.
 //! - Ctrl+Espacio: selector de apps (se escribe en la barra lateral).
+//! - Ctrl+Mayús+L: rellenar usuario y contraseña con Bitwarden (`bitwarden`).
 //!
 //! Además avisa del clic en una notificación de la app, para traer Pulpo al
-//! frente con esa app abierta.
+//! frente con esa app abierta, y del contador que la página pone con
+//! `navigator.setAppBadge` (Telegram no lo pone en el título).
 //!
 //! Las apps son webs remotas sin acceso al IPC de Tauri, así que el script de
 //! inicio avisa cambiando un instante el título del documento a una marca con
@@ -35,6 +37,8 @@ pub enum Shortcut {
     },
     /// Ctrl+Espacio.
     Switcher,
+    /// Ctrl+Mayús+L.
+    Fill,
     /// Clic en una notificación que mostró la página.
     Notification,
 }
@@ -56,6 +60,7 @@ pub fn parse(title: &str) -> Option<Shortcut> {
         "home" => Some(Shortcut::Home),
         "previous" => Some(Shortcut::Previous),
         "switcher" => Some(Shortcut::Switcher),
+        "fill" => Some(Shortcut::Fill),
         "notification" => Some(Shortcut::Notification),
         n => n
             .parse()
@@ -63,6 +68,21 @@ pub fn parse(title: &str) -> Option<Shortcut> {
             .filter(|n| (1..=9).contains(n))
             .map(|n| Shortcut::Index { n }),
     }
+}
+
+/// El contador que anuncia este título con `navigator.setAppBadge`, si es una
+/// marca de Pulpo.
+pub fn parse_badge(title: &str) -> Option<u32> {
+    title
+        .strip_prefix(marker())?
+        .strip_prefix("badge:")?
+        .parse()
+        .ok()
+}
+
+/// Si el título es una marca de Pulpo (de cualquier tipo): no es el de la página.
+pub fn is_signal(title: &str) -> bool {
+    title.starts_with(marker())
 }
 
 pub fn script() -> String {
@@ -113,6 +133,11 @@ pub fn script() -> String {
       e.stopImmediatePropagation();
       if (!e.repeat) signal("switcher");
     }}
+    if (e.ctrlKey && e.shiftKey && !e.altKey && !e.metaKey && e.code === "KeyL") {{
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (!e.repeat) signal("fill");
+    }}
   }}, true);
   window.addEventListener("keyup", (e) => {{
     if (e.key !== "Control" || !ctrlAlone) return;
@@ -139,6 +164,63 @@ pub fn script() -> String {
       }}
     }};
   }}
+  // Contador de la app (Badging API). Sin `count` es un punto sin número: 1.
+  let lastBadge = null;
+  const badge = (count) => {{
+    const n = count === undefined ? 1 : Math.max(0, Math.floor(Number(count) || 0));
+    if (n !== lastBadge) {{
+      lastBadge = n;
+      signal("badge:" + n);
+    }}
+    return Promise.resolve();
+  }};
+  navigator.setAppBadge = badge;
+  navigator.clearAppBadge = () => badge(0);
+  // Tauri define `window.isTauri` en todas las páginas (antes que este script,
+  // y no se puede quitar), así que Telegram Web A se cree su app de escritorio
+  // y manda por un IPC que las apps no tienen el contador
+  // (`window.tauri.setNotificationsCount`) y los enlaces (`window.open` y los
+  // clics en `<a>` pasan por el plugin shell). Se queda con estas funciones en
+  // vez de las suyas y, cuando escribe en `window.tauri` (solo en ese modo),
+  // los enlaces vuelven al `window.open` nativo, que Pulpo enruta como siempre.
+  if (!window.tauri) {{
+    const nativeOpen = window.open;
+    const open = (url) => nativeOpen.call(window, url, "_blank", "noopener");
+    let desktopMode = false;
+    const enterDesktopMode = () => {{
+      if (desktopMode) return;
+      desktopMode = true;
+      // Su `window.open` se guarda pero no se usa.
+      Object.defineProperty(window, "open", {{
+        get: () => nativeOpen,
+        set: () => {{}},
+        configurable: true,
+      }});
+      // Como su manejador (en `window`, después de los de la página), pero
+      // registrado antes: al marcar el evento, el suyo ya no hace nada.
+      const onClick = (e) => {{
+        if (e.defaultPrevented) return;
+        const a = e.target instanceof Element ? e.target.closest("a[href]") : null;
+        if (!a || !(a.target === "_blank" || e.ctrlKey || e.metaKey || e.button === 1)) return;
+        e.preventDefault();
+        open(a.href);
+      }};
+      window.addEventListener("click", onClick);
+      window.addEventListener("auxclick", onClick);
+    }};
+    const tauri = {{}};
+    const keep = (name, value) => Object.defineProperty(tauri, name, {{
+      get: () => value,
+      set: enterDesktopMode,
+      enumerable: true,
+    }});
+    keep("setNotificationsCount", badge);
+    keep("openNewWindow", async (url) => {{
+      open(url);
+      return true;
+    }});
+    window.tauri = tauri;
+  }}
 }})();"#
     )
 }
@@ -154,6 +236,7 @@ mod tests {
         assert_eq!(parse(&format!("{m}home")), Some(Shortcut::Home));
         assert_eq!(parse(&format!("{m}previous")), Some(Shortcut::Previous));
         assert_eq!(parse(&format!("{m}switcher")), Some(Shortcut::Switcher));
+        assert_eq!(parse(&format!("{m}fill")), Some(Shortcut::Fill));
         assert_eq!(
             parse(&format!("{m}notification")),
             Some(Shortcut::Notification)
@@ -163,5 +246,10 @@ mod tests {
         assert_eq!(parse(&format!("{m}10")), None);
         assert_eq!(parse("(3) WhatsApp"), None);
         assert_eq!(parse("home"), None);
+        assert_eq!(parse(&format!("{m}badge:4")), None);
+        assert_eq!(parse_badge(&format!("{m}badge:4")), Some(4));
+        assert_eq!(parse_badge(&format!("{m}badge:x")), None);
+        assert_eq!(parse_badge("badge:4"), None);
+        assert!(is_signal(&format!("{m}badge:x")));
     }
 }

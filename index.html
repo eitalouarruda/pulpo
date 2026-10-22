@@ -22,6 +22,12 @@
         <span class="ci-label">CI</span>
         <span class="badge"></span>
       </button>
+      <button id="vault" type="button" hidden data-i18n-title="sidebar.vault" data-i18n-label="sidebar.vault">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+          <circle cx="8" cy="15" r="4" fill="none" stroke="currentColor" stroke-width="2" />
+          <path d="M11 12l9-9M17 6l3 3M14.5 8.5l2 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
+        </svg>
+      </button>
       <button id="manage" type="button" data-i18n-title="sidebar.manage" data-i18n-label="sidebar.manage">
         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
           <path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3h-4l-.3 2.9a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.4 7.4 0 0 0 1.7 1L11 21h4l.3-2.9a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/>
@@ -87,6 +93,13 @@
           <span>
             <span data-i18n="manage.ci"></span>
             <small data-i18n="manage.ciHint"></small>
+          </span>
+        </label>
+        <label class="check">
+          <input id="vault-enabled" type="checkbox" />
+          <span>
+            <span data-i18n="manage.vault"></span>
+            <small data-i18n="manage.vaultHint"></small>
           </span>
         </label>
         <div class="zoom-row home-app-row">
@@ -190,6 +203,19 @@
         </footer>
       </form>
 
+      <form class="card" id="vault-view" hidden autocomplete="off">
+        <h2 data-i18n="vault.title"></h2>
+        <p id="vault-message"></p>
+        <input id="vault-password" type="password" data-i18n-placeholder="vault.password" hidden />
+        <div id="vault-list" role="listbox" hidden></div>
+        <p id="vault-error" class="error" role="alert"></p>
+        <footer>
+          <button type="button" class="ghost" id="vault-lock" data-i18n="vault.lock" hidden></button>
+          <button type="button" class="ghost" data-close data-i18n="action.cancel"></button>
+          <button type="submit" id="vault-unlock" data-i18n="vault.unlock" hidden></button>
+        </footer>
+      </form>
+
       <form class="card" id="form-view" hidden autocomplete="off">
         <h2 id="form-title"></h2>
         <label>
@@ -227,18 +253,6 @@
           <span class="field-label" data-i18n="form.theme"></span>
           <div id="f-theme" class="segmented" role="radiogroup"></div>
           <small class="dnd-hint" data-i18n="form.themeHint"></small>
-        </div>
-        <div class="field">
-          <span class="field-label" data-i18n="form.vpn"></span>
-          <div class="icon-row">
-            <button type="button" class="ghost-btn" id="f-vpn"></button>
-          </div>
-          <small class="dnd-hint" data-i18n="form.vpnHint"></small>
-          <!-- Lista de países: sin <select>, su lista nativa se cierra sola. -->
-          <div class="context-menu floating" id="vpn-menu" role="menu" hidden>
-            <input id="vpn-search" type="search" spellcheck="false" />
-            <div id="vpn-list"></div>
-          </div>
         </div>
         <div class="field">
           <span class="field-label" data-i18n="dnd.title"></span>

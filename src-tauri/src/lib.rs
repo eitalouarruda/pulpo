@@ -1,3 +1,4 @@
+mod bitwarden;
 mod ci;
 mod diag;
 mod display;
@@ -12,7 +13,6 @@ mod spellcheck;
 #[cfg(windows)]
 mod tray;
 mod update;
-mod vpn;
 mod wallpaper;
 
 use std::collections::BTreeSet;
@@ -250,7 +250,6 @@ fn add_service(
     adblock: bool,
     group: Option<String>,
     theme: Theme,
-    vpn: Option<String>,
 ) -> Result<Service, String> {
     let url = services::normalize_url(&url)?;
     let state = app.state::<AppState>();
@@ -275,7 +274,6 @@ fn add_service(
             enabled: true,
             dnd: Dnd::default(),
             theme,
-            vpn: services::normalize_vpn(vpn),
         };
         list.push(service.clone());
         service
@@ -288,7 +286,6 @@ fn add_service(
 }
 
 #[tauri::command]
-#[allow(clippy::too_many_arguments)] // los campos del formulario
 fn update_service(
     app: AppHandle,
     id: String,
@@ -297,9 +294,7 @@ fn update_service(
     adblock: bool,
     group: Option<String>,
     theme: Theme,
-    vpn: Option<String>,
 ) -> Result<(), String> {
-    let vpn = services::normalize_vpn(vpn);
     let url = services::normalize_url(&url)?;
     let state = app.state::<AppState>();
     let (url_changed, reopen) = {
@@ -311,11 +306,7 @@ fn update_service(
         let url_changed = service.url != url;
         // El tema también: cambiarlo en caliente no llega a todas las páginas
         // (algunas lo leen solo al crear el webview).
-        // El proxy de la VPN también se fija al crear el webview.
-        let reopen = url_changed
-            || service.adblock != adblock
-            || service.theme != theme
-            || service.vpn != vpn;
+        let reopen = url_changed || service.adblock != adblock || service.theme != theme;
         if !name.trim().is_empty() {
             service.name = name.trim().to_string();
         }
@@ -328,7 +319,6 @@ fn update_service(
         service.adblock = adblock;
         service.group = services::normalize_group(group);
         service.theme = theme;
-        service.vpn = vpn;
         (url_changed, reopen)
     };
     services_changed(&app);
@@ -336,7 +326,7 @@ fn update_service(
         fetch_icon(&app, id.clone(), url);
     }
     if reopen {
-        // El bloqueo de red, los scripts, el tema y la VPN se fijan al crear el webview.
+        // El bloqueo de red, los scripts y el tema se fijan al crear el webview.
         let app = app.clone();
         std::thread::spawn(move || {
             close_webview(&app, &id);
@@ -716,6 +706,7 @@ pub fn run() {
             #[cfg(target_os = "linux")]
             display::guard_focus(data_dir.join("focus.log"));
             dnd::watch(app.handle());
+            app.manage(bitwarden::Vault::default());
             app.manage(ci::Ci::default());
             ci::watch(app.handle());
 
@@ -830,6 +821,13 @@ pub fn run() {
             dnd_active,
             check_update,
             install_update,
+            bitwarden::bw_enabled,
+            bitwarden::bw_set_enabled,
+            bitwarden::bw_status,
+            bitwarden::bw_unlock,
+            bitwarden::bw_lock,
+            bitwarden::bw_logins,
+            bitwarden::bw_fill,
             ci::ci_accounts,
             ci::ci_check_token,
             ci::ci_runs,
@@ -848,7 +846,6 @@ pub fn run() {
             wallpaper::wallpaper_delete,
             wallpaper::wallpaper_import,
             wallpaper::wallpaper_search,
-            vpn::vpn_countries,
             wallpaper::wallpaper_download,
         ])
         .run(tauri::generate_context!())
@@ -1063,6 +1060,10 @@ fn open_service(
     #[cfg(target_os = "linux")]
     let initial_load_tx = Mutex::new(Some(initial_load_tx));
     let id = service.id.clone();
+    // La página puso un contador con `navigator.setAppBadge`: manda ese, no el
+    // del título (Telegram pone ahí el nombre del chat). Vale hasta la siguiente carga.
+    let app_badge = Arc::new(AtomicBool::new(false));
+    let app_badge_load = app_badge.clone();
     let mut builder =
         WebviewBuilder::new(&id, WebviewUrl::External("about:blank".parse().unwrap()))
             .data_directory(profile)
@@ -1093,7 +1094,16 @@ fn open_service(
                     std::thread::spawn(move || on_shortcut(&app, shortcut, &id));
                     return;
                 }
-                let count = services::badge_from_title(&title).unwrap_or(0);
+                let count = match shortcuts::parse_badge(&title) {
+                    Some(count) => {
+                        app_badge.store(true, Ordering::Relaxed);
+                        count
+                    }
+                    None if shortcuts::is_signal(&title) || app_badge.load(Ordering::Relaxed) => {
+                        return
+                    }
+                    None => services::badge_from_title(&title).unwrap_or(0),
+                };
                 let _ = webview.app_handle().emit_to(
                     "shell",
                     "badge",
@@ -1104,6 +1114,9 @@ fn open_service(
                 );
             })
             .on_page_load(move |webview, payload| {
+                if payload.event() == PageLoadEvent::Started {
+                    app_badge_load.store(false, Ordering::Relaxed);
+                }
                 // El estado de no molestar vive en la página: se repone en cada carga.
                 let app = webview.app_handle();
                 dnd::apply(app, webview.label(), dnd::is_active(app, webview.label()));
@@ -1150,24 +1163,9 @@ fn open_service(
                     }
                 }
             });
-    // VPN: todo pasa por el proxy local de su país. Si no arranca, la app no
-    // se abre: nunca sale por la conexión normal sin que el usuario lo sepa.
-    let proxy = match service.vpn.as_deref() {
-        Some(country) => Some(vpn::proxy_url(country)?),
-        None => None,
-    };
     #[cfg(windows)]
     {
-        // wry ignora `proxy_url` cuando hay argumentos propios: van aquí.
-        let mut args = spellcheck::webview2_args();
-        if let Some(proxy) = &proxy {
-            args.push_str(&format!(" --proxy-server={proxy} {}", vpn::WEBRTC_ARG));
-        }
-        builder = builder.additional_browser_args(&args);
-    }
-    #[cfg(target_os = "linux")]
-    if let Some(proxy) = &proxy {
-        builder = builder.proxy_url(proxy.clone());
+        builder = builder.additional_browser_args(&spellcheck::webview2_args());
     }
     #[cfg(target_os = "linux")]
     if let Some(script) = platform::compose_script() {
@@ -1202,14 +1200,7 @@ fn open_service(
     }
 
     #[cfg(target_os = "linux")]
-    platform::attach(
-        &webview,
-        initial_load,
-        blocker,
-        &service.url,
-        service.theme,
-        proxy.is_some(),
-    )?;
+    platform::attach(&webview, initial_load, blocker, &service.url, service.theme)?;
     #[cfg(windows)]
     {
         let url = service.url.clone();
@@ -1264,6 +1255,13 @@ fn on_shortcut(app: &AppHandle, shortcut: shortcuts::Shortcut, id: &str) {
             }
         }
         // Clic en una notificación: Pulpo al frente, en la app que la mostró.
+        // Rellenar con Bitwarden: el shell busca las entradas y pregunta.
+        shortcuts::Shortcut::Fill => {
+            if bitwarden::enabled(app) {
+                let _ = app.emit_to("shell", "fill-request", id);
+            }
+            return;
+        }
         shortcuts::Shortcut::Notification => {
             raise_window(app);
             let _ = app.emit_to("shell", "notification-clicked", id);
