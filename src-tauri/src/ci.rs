@@ -877,6 +877,7 @@ fn play_sound(app: &AppHandle, kind: NoticeKind) {
 
 /// Campanita en WAV (mono, 16 bits): dos notas que suben si salió bien, que
 /// bajan si falló, una sola si se canceló.
+#[cfg(any(target_os = "linux", test))]
 fn chime(kind: NoticeKind) -> Vec<u8> {
     const RATE: u32 = 44_100;
     const NOTE: f32 = 0.16;
