@@ -23,9 +23,9 @@ use std::time::{Duration, Instant};
 
 use blocker::Blocker;
 use serde::Serialize;
-#[cfg(target_os = "linux")]
-use tauri::webview::PageLoadEvent;
-use tauri::webview::{NewWindowResponse, PermissionKind, PermissionResponse, WebviewBuilder};
+use tauri::webview::{
+    NewWindowResponse, PageLoadEvent, PermissionKind, PermissionResponse, WebviewBuilder,
+};
 use tauri::window::WindowBuilder;
 use tauri::{
     AppHandle, Emitter, LogicalPosition, LogicalSize, Manager, Url, Webview, WebviewUrl,
@@ -831,6 +831,7 @@ pub fn run() {
             ci::ci_accounts,
             ci::ci_check_token,
             ci::ci_runs,
+            ci::ci_dismiss,
             ci::ci_add_token,
             ci::ci_remove_account,
             ci::ci_list_repos,

@@ -988,6 +988,26 @@ label.check small {
   }
 }
 
+.ci-dismiss {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 24px;
+  height: 24px;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: var(--muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.ci-dismiss:hover {
+  background: var(--field);
+  color: var(--fg);
+}
+
 .ci-time {
   flex: none;
   color: var(--muted);

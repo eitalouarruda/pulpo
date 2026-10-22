@@ -178,11 +178,21 @@ impl Run {
     fn finished(&self) -> bool {
         self.status == "completed"
     }
+
+    /// Terminó mal (como `ciState` "fail" en la barra lateral): no se quita
+    /// solo, hasta que el usuario lo descarte.
+    fn failed(&self) -> bool {
+        self.finished()
+            && matches!(
+                self.conclusion.as_deref(),
+                Some("failure" | "timed_out" | "startup_failure" | "action_required")
+            )
+    }
 }
 
 struct Tracked {
     run: Run,
-    /// Cuándo se vio terminado (se quita `LINGER` después).
+    /// Cuándo se vio terminado (se quita `LINGER` después, salvo si falló).
     finished_at: Option<Instant>,
 }
 
@@ -382,6 +392,22 @@ pub fn ci_accounts(app: AppHandle) -> Vec<Account> {
 #[tauri::command]
 pub fn ci_runs(app: AppHandle) -> Vec<Run> {
     runs(&app)
+}
+
+/// Quita de la lista un run terminado (el botón ✕ de la vista CI).
+#[tauri::command]
+pub fn ci_dismiss(app: AppHandle, id: u64) {
+    let removed = {
+        let ci = app.state::<Ci>();
+        let mut runs = ci.runs.lock().unwrap();
+        match runs.get(&id) {
+            Some(t) if t.run.finished() => runs.remove(&id).is_some(),
+            _ => false,
+        }
+    };
+    if removed {
+        emit_runs(&app);
+    }
 }
 
 /// Dueños (usuario u organización) de una lista de repos, sin repetir.
@@ -733,32 +759,165 @@ pub fn ci_open(app: AppHandle, url: String) -> Result<(), String> {
 }
 
 /// Muestra el aviso de un run terminado. El texto lo arma la barra lateral
-/// (conoce el idioma); un clic abre el run en el navegador.
+/// (conoce el idioma); un clic abre el run en el navegador. `state` es el de
+/// `ciState` en la barra lateral ("ok", "fail" u otro): elige el icono y el
+/// sonido, y un fallo queda en pantalla hasta cerrarlo.
 #[tauri::command]
-pub fn ci_notify(app: AppHandle, summary: String, body: String, url: String) {
+pub fn ci_notify(app: AppHandle, summary: String, body: String, url: String, state: String) {
     std::thread::spawn(move || {
+        let kind = NoticeKind::from(state.as_str());
         let mut notification = notify_rust::Notification::new();
         notification.summary(&summary).body(&body).appname("Pulpo");
+        if let Some(icon) = notice_icon(&app, kind) {
+            notification.icon(&icon.to_string_lossy());
+        }
         #[cfg(target_os = "linux")]
         {
+            notification.urgency(match kind {
+                NoticeKind::Fail => notify_rust::Urgency::Critical,
+                _ => notify_rust::Urgency::Normal,
+            });
             notification.action("default", "Open");
             match notification.show() {
-                Ok(handle) => handle.wait_for_action(|action| {
-                    if action == "default" {
-                        let _ = ci_open(app, url);
-                    }
-                }),
+                Ok(handle) => {
+                    play_sound(&app, kind);
+                    handle.wait_for_action(|action| {
+                        if action == "default" {
+                            let _ = ci_open(app, url);
+                        }
+                    })
+                }
                 Err(e) => eprintln!("[pulpo] ci: no se pudo mostrar el aviso: {e}"),
             }
         }
         #[cfg(not(target_os = "linux"))]
         {
-            let _ = (app, url);
+            // Windows suena solo: el sonido por defecto de los avisos del sistema.
+            let _ = url;
             if let Err(e) = notification.show() {
                 eprintln!("[pulpo] ci: no se pudo mostrar el aviso: {e}");
             }
         }
     });
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum NoticeKind {
+    Ok,
+    Fail,
+    Other,
+}
+
+impl From<&str> for NoticeKind {
+    fn from(state: &str) -> Self {
+        match state {
+            "ok" => Self::Ok,
+            "fail" => Self::Fail,
+            _ => Self::Other,
+        }
+    }
+}
+
+impl NoticeKind {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Ok => "ok",
+            Self::Fail => "fail",
+            Self::Other => "off",
+        }
+    }
+}
+
+/// Escribe (una vez) `bytes` en `<cache>/ci/<name>` y devuelve la ruta: el
+/// servidor de avisos y el reproductor necesitan un archivo.
+fn cached_file(app: &AppHandle, name: &str, bytes: &[u8]) -> Option<std::path::PathBuf> {
+    let dir = app.path().app_cache_dir().ok()?.join("ci");
+    let path = dir.join(name);
+    if std::fs::metadata(&path).map(|m| m.len()).ok() != Some(bytes.len() as u64) {
+        std::fs::create_dir_all(&dir).ok()?;
+        std::fs::write(&path, bytes).ok()?;
+    }
+    Some(path)
+}
+
+/// Icono del aviso: círculo verde, rojo o gris, como los de la vista CI.
+fn notice_icon(app: &AppHandle, kind: NoticeKind) -> Option<std::path::PathBuf> {
+    let bytes: &[u8] = match kind {
+        NoticeKind::Ok => include_bytes!("../icons/ci-ok.png"),
+        NoticeKind::Fail => include_bytes!("../icons/ci-fail.png"),
+        NoticeKind::Other => include_bytes!("../icons/ci-off.png"),
+    };
+    cached_file(app, &format!("{}.png", kind.name()), bytes)
+}
+
+/// Suena al llegar el aviso. En Linux el servidor de avisos no pone sonido
+/// (en las apps web lo pone la página), así que Pulpo reproduce el suyo con el
+/// primer reproductor que haya: PipeWire, PulseAudio o ALSA.
+#[cfg(target_os = "linux")]
+fn play_sound(app: &AppHandle, kind: NoticeKind) {
+    let Some(path) = cached_file(app, &format!("{}.wav", kind.name()), &chime(kind)) else {
+        return;
+    };
+    let played = ["pw-play", "paplay", "aplay"].iter().any(|player| {
+        let mut command = std::process::Command::new(player);
+        if *player == "aplay" {
+            command.arg("-q");
+        }
+        command
+            .arg(&path)
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .status()
+            .is_ok_and(|s| s.success())
+    });
+    if !played {
+        eprintln!("[pulpo] ci: no se pudo reproducir el sonido del aviso");
+    }
+}
+
+/// Campanita en WAV (mono, 16 bits): dos notas que suben si salió bien, que
+/// bajan si falló, una sola si se canceló.
+fn chime(kind: NoticeKind) -> Vec<u8> {
+    const RATE: u32 = 44_100;
+    const NOTE: f32 = 0.16;
+    const TAIL: f32 = 0.5;
+    let notes: &[f32] = match kind {
+        NoticeKind::Ok => &[659.25, 987.77],
+        NoticeKind::Fail => &[523.25, 392.0, 311.13],
+        NoticeKind::Other => &[659.25],
+    };
+    let total = NOTE * (notes.len() - 1) as f32 + TAIL;
+    let len = (total * RATE as f32) as usize;
+    let mut samples = vec![0f32; len];
+    for (i, freq) in notes.iter().enumerate() {
+        let start = (i as f32 * NOTE * RATE as f32) as usize;
+        for (n, sample) in samples[start..].iter_mut().enumerate() {
+            let t = n as f32 / RATE as f32;
+            // Ataque corto (sin chasquido) y caída exponencial, con un armónico.
+            let envelope = (t / 0.005).min(1.0) * (-t * 7.0).exp();
+            let phase = 2.0 * std::f32::consts::PI * freq * t;
+            *sample += envelope * (phase.sin() + 0.25 * (2.0 * phase).sin());
+        }
+    }
+    let data_len = (len * 2) as u32;
+    let mut wav = Vec::with_capacity(44 + len * 2);
+    wav.extend_from_slice(b"RIFF");
+    wav.extend_from_slice(&(36 + data_len).to_le_bytes());
+    wav.extend_from_slice(b"WAVEfmt ");
+    wav.extend_from_slice(&16u32.to_le_bytes());
+    wav.extend_from_slice(&1u16.to_le_bytes()); // PCM
+    wav.extend_from_slice(&1u16.to_le_bytes()); // mono
+    wav.extend_from_slice(&RATE.to_le_bytes());
+    wav.extend_from_slice(&(RATE * 2).to_le_bytes());
+    wav.extend_from_slice(&2u16.to_le_bytes());
+    wav.extend_from_slice(&16u16.to_le_bytes());
+    wav.extend_from_slice(b"data");
+    wav.extend_from_slice(&data_len.to_le_bytes());
+    for sample in samples {
+        let value = (sample * 0.3).clamp(-1.0, 1.0) * i16::MAX as f32;
+        wav.extend_from_slice(&(value as i16).to_le_bytes());
+    }
+    wav
 }
 
 // ---------------------------------------------------------------- sondeo
@@ -798,13 +957,15 @@ pub fn watch(app: &AppHandle) {
     });
 }
 
-/// Quita los runs terminados hace más de `LINGER`. `true` si quitó alguno.
+/// Quita los runs terminados hace más de `LINGER`, menos los fallidos (esos
+/// esperan a `ci_dismiss`). `true` si quitó alguno.
 fn expire(ci: &Ci, now: Instant) -> bool {
     let mut runs = ci.runs.lock().unwrap();
     let before = runs.len();
     runs.retain(|_, t| {
-        t.finished_at
-            .is_none_or(|at| now.duration_since(at) < LINGER)
+        t.run.failed()
+            || t.finished_at
+                .is_none_or(|at| now.duration_since(at) < LINGER)
     });
     runs.len() != before
 }
@@ -954,6 +1115,21 @@ mod tests {
     use super::*;
     use serde_json::json;
 
+    #[test]
+    fn chime_is_a_valid_wav() {
+        for kind in [NoticeKind::Ok, NoticeKind::Fail, NoticeKind::Other] {
+            let wav = chime(kind);
+            assert_eq!(&wav[..4], b"RIFF");
+            assert_eq!(&wav[8..16], b"WAVEfmt ");
+            let riff = u32::from_le_bytes(wav[4..8].try_into().unwrap()) as usize;
+            let data = u32::from_le_bytes(wav[40..44].try_into().unwrap()) as usize;
+            assert_eq!(riff + 8, wav.len());
+            assert_eq!(data + 44, wav.len());
+        }
+        assert_eq!(NoticeKind::from("fail"), NoticeKind::Fail);
+        assert_eq!(NoticeKind::from("pending"), NoticeKind::Other);
+    }
+
     fn api_run(id: u64, status: &str, conclusion: Option<&str>) -> Value {
         json!({
             "id": id,
@@ -1031,6 +1207,33 @@ mod tests {
             now,
         );
         assert!(again.is_empty());
+    }
+
+    #[test]
+    fn failed_runs_stay_until_dismissed() {
+        let ci = Ci::default();
+        let start = Instant::now();
+        {
+            let mut runs = ci.runs.lock().unwrap();
+            merge(
+                &mut runs,
+                None,
+                vec![run(1, "queued", None), run(2, "queued", None)],
+                start,
+            );
+            merge(
+                &mut runs,
+                Some(&BTreeSet::from([1, 2])),
+                vec![
+                    run(1, "completed", Some("failure")),
+                    run(2, "completed", Some("cancelled")),
+                ],
+                start,
+            );
+        }
+        assert!(expire(&ci, start + LINGER * 10));
+        let left: Vec<u64> = ci.runs.lock().unwrap().keys().copied().collect();
+        assert_eq!(left, vec![1]);
     }
 
     #[test]

@@ -1759,6 +1759,18 @@ function renderCi() {
       elapsed.textContent = ciDuration(r);
       time.append(elapsed);
       li.append(dot, text, time);
+      // Terminados: se pueden quitar. Los fallidos no se van solos.
+      if (r.status === "completed") {
+        const dismiss = document.createElement("button");
+        dismiss.className = "ci-dismiss";
+        dismiss.textContent = "✕";
+        dismiss.title = t("ci.remove");
+        dismiss.addEventListener("click", (e) => {
+          e.stopPropagation();
+          invoke("ci_dismiss", { id: r.id }).catch(console.error);
+        });
+        li.append(dismiss);
+      }
       li.addEventListener("click", () => invoke("ci_open", { url: r.url }).catch(console.error));
       return li;
     }),
@@ -2023,6 +2035,7 @@ await listen<CiRun>("ci-finished", ({ payload: r }) => {
     summary: `${mark} ${repoName(r.repo)} · ${r.workflow}`,
     body: [ciStatusText(r), r.branch, ciDuration(r)].filter(Boolean).join(" · "),
     url: r.url,
+    state,
   }).catch(console.error);
 });
 
