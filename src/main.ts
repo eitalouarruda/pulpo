@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
+import { periodOf, pickGreeting } from "./greetings";
 import { applyI18n, currentLanguage, type Language, LANGUAGES, setLanguage, t, tError } from "./i18n";
 import { currentTheme, setTheme, THEMES } from "./theme";
 
@@ -143,6 +144,7 @@ function selectIndex(n: number) {
 /// Página inicial: ninguna app activa.
 function goHome() {
   active = null;
+  newGreeting();
   markCurrent();
   invoke("show_home").catch(console.error);
   showBase(true);
@@ -241,6 +243,37 @@ function renderHome() {
     sections.push(empty as unknown as HTMLElement);
   }
   home.replaceChildren(...sections);
+}
+
+// ---------------------------------------------------------------- reloj y saludo
+
+let greeting = "";
+let greetingPeriod = "";
+
+/// Saludo nuevo en cada visita a la página inicial (y al cambiar de periodo).
+function newGreeting() {
+  const now = new Date();
+  greetingPeriod = periodOf(now);
+  greeting = pickGreeting(currentLanguage(), periodOf(now), greeting);
+  renderClock();
+}
+
+function renderClock() {
+  const now = new Date();
+  if (periodOf(now) !== greetingPeriod) return newGreeting();
+  const lang = currentLanguage();
+  const time = $("#home-time");
+  time.textContent = now.toLocaleTimeString(lang, { hour: "2-digit", minute: "2-digit" });
+  time.setAttribute("datetime", now.toISOString());
+  const date = now.toLocaleDateString(lang, { weekday: "long", day: "numeric", month: "long" });
+  $("#home-date").textContent = date.charAt(0).toLocaleUpperCase(lang) + date.slice(1);
+  $("#home-greeting").textContent = greeting;
+}
+
+/// Al empezar cada minuto, aunque no se vea (es barato).
+function tickClock() {
+  renderClock();
+  setTimeout(tickClock, 60_000 - (Date.now() % 60_000) + 50);
 }
 
 /// Grupos plegados (por nombre). Es solo de la vista: se recuerda aquí.
@@ -1563,6 +1596,8 @@ function changeLanguage(lang: Language) {
   sendTrayTexts();
   renderLanguages();
   renderThemes();
+  greeting = "";
+  newGreeting();
   // Los textos que se pintan desde aquí se rehacen con el idioma nuevo.
   renderSidebar();
   renderManage();
@@ -1579,6 +1614,8 @@ function changeLanguage(lang: Language) {
 renderLanguages();
 renderThemes();
 applyI18n();
+newGreeting();
+tickClock();
 sendTrayTexts();
 
 homeApp = await invoke<string | null>("get_home_app");
