@@ -48,15 +48,10 @@ interface Preset {
   adblock: boolean;
 }
 
-type BlockerStatus =
-  | { state: "loading" }
-  | { state: "ready" }
-  | { state: "error"; message: string };
 
 const $ = <T extends HTMLElement>(sel: string) => document.querySelector<T>(sel)!;
 
 const nav = $("#services");
-const status = $("#status");
 const overlay = $("#overlay");
 const views = {
   home: $("#home-view"),
@@ -91,24 +86,12 @@ let services: Service[] = [];
 /// App de la mitad inferior de la página inicial (null: ninguna).
 let homeApp: string | null = null;
 let active: string | null = null;
+let vaultRequest = 0;
 const badges = new Map<string, number>();
 /// Apps con no molestar activo ahora (lo decide Rust).
 let dndActive = new Set<string>();
 
 // ---------------------------------------------------------------- barra lateral
-
-let lastStatus: BlockerStatus = { state: "loading" };
-
-function showStatus(s: BlockerStatus) {
-  lastStatus = s;
-  status.dataset.state = s.state;
-  status.title =
-    s.state === "loading"
-      ? t("status.loading")
-      : s.state === "ready"
-        ? t("status.ready")
-        : t("status.error", { message: s.message });
-}
 
 function markCurrent() {
   for (const b of nav.querySelectorAll<HTMLElement>(".service")) {
@@ -481,6 +464,10 @@ function closeOverlay() {
   // Descargando la actualización: al terminar Pulpo se reinicia solo.
   if (updating && currentView() === "update") return;
   const current = currentView();
+  if (current === "vault") {
+    vaultRequest++;
+    $<HTMLInputElement>("#vault-password").value = "";
+  }
   editing = removing = null;
   // Añadir token vuelve a la configuración, que se rehace con lo nuevo.
   if (current === "ciToken") return openCiSetup();
@@ -512,14 +499,20 @@ function currentView(): View | null {
 
 function renderHomeAppChoice() {
   const box = $("#home-app");
+  const current = $("#home-app-current");
+  const picker = $<HTMLDetailsElement>("#home-app-picker");
+  current.textContent = services.find((s) => s.id === homeApp)?.name ?? t("manage.homeAppNone");
   const choice = (id: string | null, label: string) => {
     const b = document.createElement("button");
     b.type = "button";
-    b.role = "radio";
-    b.className = "ghost-btn";
+    b.role = "option";
     b.textContent = label;
-    b.setAttribute("aria-checked", String(id === homeApp));
-    b.addEventListener("click", () => setHomeApp(id));
+    b.setAttribute("aria-selected", String(id === homeApp));
+    b.addEventListener("click", () => {
+      setHomeApp(id);
+      picker.open = false;
+      current.focus();
+    });
     return b;
   };
   box.replaceChildren(
@@ -527,6 +520,26 @@ function renderHomeAppChoice() {
     ...services.filter((s) => s.enabled).map((s) => choice(s.id, s.name)),
   );
 }
+
+const homeAppPicker = $<HTMLDetailsElement>("#home-app-picker");
+homeAppPicker.addEventListener("keydown", (event) => {
+  if (event.key === "Escape" && homeAppPicker.open) {
+    event.preventDefault(); event.stopPropagation();
+    homeAppPicker.open = false; $("#home-app-current").focus(); return;
+  }
+  if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(event.key)) return;
+  event.preventDefault();
+  homeAppPicker.open = true;
+  const options = [...$("#home-app").querySelectorAll<HTMLButtonElement>("button")];
+  const index = options.indexOf(document.activeElement as HTMLButtonElement);
+  const selected = options.findIndex((b) => b.getAttribute("aria-selected") === "true");
+  const next = event.key === "Home" ? 0 : event.key === "End" ? options.length - 1
+    : index < 0 ? Math.max(0, selected) : (index + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length;
+  options[next]?.focus();
+});
+document.addEventListener("click", (event) => {
+  if (event.target instanceof Node && !homeAppPicker.contains(event.target)) homeAppPicker.open = false;
+});
 
 function setHomeApp(id: string | null) {
   homeApp = id;
@@ -1489,7 +1502,6 @@ function changeLanguage(lang: Language) {
   renderSortings();
   const base = baseView();
   if (base) renderBase(base);
-  showStatus(lastStatus);
   invoke<ZoomInfo>("get_zoom").then(showZoom).catch(console.error);
 }
 
@@ -1508,9 +1520,7 @@ active = await invoke<string | null>("active_service");
 if (active) recent = [active];
 renderSidebar();
 showBase();
-showStatus(await invoke<BlockerStatus>("blocker_status"));
 
-await listen<BlockerStatus>("blocker-status", (e) => showStatus(e.payload));
 await listen<string | null>("home-app-changed", (e) => {
   homeApp = e.payload;
   syncHomePane();
@@ -2300,6 +2310,28 @@ const vault = {
 };
 /// App en la que se rellena.
 let fillTarget: string | null = null;
+let fillBusy = false;
+let vaultIsEnabled = false;
+let vaultEmail = "";
+let vaultStatusTask: Promise<VaultStatus> | null = null;
+
+function getVaultStatus() {
+  return vaultStatusTask ??= invoke<VaultStatus>("bw_status").finally(() => { vaultStatusTask = null; });
+}
+
+function validVaultRequest(request: number, target = fillTarget) {
+  return request === vaultRequest && target !== null && fillTarget === target
+    && currentView() === "vault" && (active === target || (active === null && homeApp === target));
+}
+
+function showVaultFailure(error: unknown) {
+  const key = String(error);
+  if (key === "bitwarden.error.locked") return showVault("unlock", t("vault.locked", { email: vaultEmail }));
+  if (key === "bitwarden.error.unauthenticated") return showVault("message", t("vault.login"), true);
+  if (key === "bitwarden.error.missing") return showVault("message", t("vault.missing"));
+  showVault("message", "");
+  vault.error.textContent = tError(error);
+}
 
 function serviceName(id: string) {
   return services.find((s) => s.id === id)?.name ?? id;
@@ -2333,24 +2365,33 @@ function backToApp() {
 }
 
 async function startFill(id: string) {
+  if (fillBusy || !vaultIsEnabled) return;
+  fillBusy = true;
   fillTarget = id;
+  const request = ++vaultRequest;
+  vault.list.replaceChildren();
+  showVault("message", t("vault.loading"));
   try {
-    const status = await invoke<VaultStatus>("bw_status");
+    const status = await getVaultStatus();
+    if (!validVaultRequest(request, id)) return;
+    vaultEmail = status.email ?? vaultEmail;
     if (status.state === "missing") return showVault("message", t("vault.missing"));
     if (status.state === "unauthenticated") return showVault("message", t("vault.login"), true);
     if (status.state === "locked") {
       return showVault("unlock", t("vault.locked", { email: status.email ?? "" }));
     }
-    await listLogins();
+    await listLogins(request);
   } catch (e) {
-    showVault("message", "");
-    vault.error.textContent = tError(e);
-  }
+    if (validVaultRequest(request, id)) showVaultFailure(e);
+  } finally { fillBusy = false; }
 }
 
-async function listLogins() {
+async function listLogins(request = vaultRequest) {
   if (!fillTarget) return;
-  const entries = await invoke<VaultEntry[]>("bw_logins", { service: fillTarget });
+  const target = fillTarget;
+  showVault("message", t("vault.filling"));
+  const entries = await invoke<VaultEntry[]>("bw_logins", { service: target });
+  if (!validVaultRequest(request, target)) return;
   // Una sola: se rellena sin preguntar.
   if (entries.length === 1) return fill(entries[0].id);
   if (!entries.length) {
@@ -2368,36 +2409,48 @@ async function listLogins() {
       const user = document.createElement("span");
       user.textContent = entry.username;
       b.append(name, user);
-      b.addEventListener("click", () => fill(entry.id));
+      b.addEventListener("click", () => {
+        if (fillBusy) return;
+        fillBusy = true;
+        void fill(entry.id, request).finally(() => { fillBusy = false; });
+      });
       return b;
     }),
   );
   showVault("list", t("vault.choose", { app: serviceName(fillTarget) }));
 }
 
-async function fill(id: string) {
-  if (!fillTarget) return;
+async function fill(id: string, request = vaultRequest) {
+  if (!fillTarget || !validVaultRequest(request)) return;
   try {
+    showVault("message", t("vault.filling"));
     await invoke("bw_fill", { service: fillTarget, id });
-    backToApp();
+    if (validVaultRequest(request)) backToApp();
   } catch (e) {
-    showVault("message", "");
-    vault.error.textContent = tError(e);
+    if (validVaultRequest(request)) showVaultFailure(e);
   }
 }
 
-views.vault.addEventListener("submit", (e) => {
+views.vault.addEventListener("submit", async (e) => {
   e.preventDefault();
-  if (vault.unlock.hidden) return;
+  if (vault.unlock.hidden || fillBusy) return;
+  fillBusy = true;
+  const request = vaultRequest;
+  const password = vault.password.value;
+  vault.password.value = "";
   vault.unlock.disabled = true;
   vault.error.textContent = "";
-  invoke("bw_unlock", { password: vault.password.value })
-    .then(() => listLogins())
-    .catch((e) => {
-      vault.error.textContent = tError(e);
-      vault.password.select();
-    })
-    .finally(() => (vault.unlock.disabled = false));
+  showVault("message", t("vault.unlocking"));
+  try {
+    await invoke("bw_unlock", { password });
+    if (validVaultRequest(request)) await listLogins(request);
+  } catch (error) {
+    if (!validVaultRequest(request)) return;
+    if (String(error) === "bitwarden.error.password") {
+      showVault("unlock", t("vault.locked", { email: vaultEmail }));
+      vault.error.textContent = tError(error);
+    } else showVaultFailure(error);
+  } finally { fillBusy = false; vault.unlock.disabled = false; }
 });
 vault.lock.addEventListener("click", () => {
   invoke("bw_lock").catch(console.error);
@@ -2409,11 +2462,27 @@ vault.button.addEventListener("click", () => {
 });
 // Ctrl+Mayús+L dentro de una app (Rust solo lo manda con Bitwarden activado).
 await listen<string>("fill-request", ({ payload }) => startFill(payload));
+// Também funciona com foco na barra lateral e nos diálogos do Pulpo.
+window.addEventListener("keydown", (event) => {
+  if (!vaultIsEnabled || !event.ctrlKey || !event.shiftKey || event.altKey || event.metaKey || event.code !== "KeyL") return;
+  event.preventDefault();
+  if (event.repeat) return;
+  if (currentView() === "vault" && !overlay.hidden) {
+    if (!vault.password.hidden) vault.password.focus();
+    return;
+  }
+  if (active) void startFill(active);
+  else showVault("message", t("vault.noApp"));
+});
 
 const vaultEnabledBox = $<HTMLInputElement>("#vault-enabled");
 function showVaultEnabled(enabled: boolean) {
+  const wasEnabled = vaultIsEnabled;
+  vaultIsEnabled = enabled;
   vault.button.hidden = !enabled;
   vaultEnabledBox.checked = enabled;
+  if (enabled && !wasEnabled) void getVaultStatus().catch(console.error);
+  if (!enabled) { vaultRequest++; vault.password.value = ""; vault.list.replaceChildren(); }
 }
 vaultEnabledBox.addEventListener("change", () =>
   invoke("bw_set_enabled", { enabled: vaultEnabledBox.checked }).catch(console.error),

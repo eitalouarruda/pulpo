@@ -1,6 +1,10 @@
 /** Interface languages. English is the default and the source of the keys. */
 
 const en = {
+  "vault.loading": "Checking vault…",
+  "vault.unlocking": "Unlocking vault…",
+  "vault.filling": "Finding and filling login…",
+
   "music.open": "Open YouTube Music",
   "music.progress": "Playback position",
   "music.enabled": "YouTube Music mini player",
@@ -18,9 +22,6 @@ const en = {
   "sidebar.services": "Apps",
   "sidebar.add": "Add app",
   "sidebar.manage": "Manage apps",
-  "status.loading": "Loading ad filters…",
-  "status.ready": "Ad filters ready",
-  "status.error": "Ad blocking disabled: {message}",
 
   "home.ungrouped": "Apps",
   "home.empty": "No apps yet. Add one with the + button.",
@@ -197,10 +198,10 @@ const en = {
   "manage.ci": "Show CI in the sidebar",
   "manage.ciHint": "GitHub Actions runs (builds, deploys…) of the repositories you choose.",
   "manage.vault": "Fill in logins with Bitwarden",
-  "manage.vaultHint": "Key button in the sidebar and Ctrl+Shift+L inside an app. Needs the Bitwarden CLI (bw).",
+  "manage.vaultHint": "Key button in the sidebar and Ctrl+Shift+L. Needs the Bitwarden CLI (bw).",
   "bitwarden.error.disabled": "Bitwarden is turned off",
 
-  "sidebar.vault": "Bitwarden: fill in login (Ctrl+Shift+L inside an app)",
+  "sidebar.vault": "Bitwarden: fill in login (Ctrl+Shift+L)",
   "vault.title": "Bitwarden",
   "vault.password": "Master password",
   "vault.unlock": "Unlock",
@@ -224,6 +225,10 @@ export type MessageKey = keyof typeof en;
 type Dictionary = Record<MessageKey, string>;
 
 const es: Dictionary = {
+  "vault.loading": "Comprobando la bóveda…",
+  "vault.unlocking": "Desbloqueando la bóveda…",
+  "vault.filling": "Buscando y rellenando el inicio de sesión…",
+
   "music.open": "Abrir YouTube Music",
   "music.progress": "Posición de reproducción",
   "music.enabled": "Mini reproductor de YouTube Music",
@@ -241,9 +246,6 @@ const es: Dictionary = {
   "sidebar.services": "Apps",
   "sidebar.add": "Agregar app",
   "sidebar.manage": "Administrar apps",
-  "status.loading": "Cargando filtros de anuncios…",
-  "status.ready": "Filtros de anuncios listos",
-  "status.error": "Bloqueo de anuncios desactivado: {message}",
 
   "home.ungrouped": "Apps",
   "home.empty": "Todavía no hay apps. Agrega una con el botón +.",
@@ -420,10 +422,10 @@ const es: Dictionary = {
   "manage.ci": "Mostrar CI en la barra lateral",
   "manage.ciHint": "Los runs de GitHub Actions (builds, deploys…) de los repositorios que elijas.",
   "manage.vault": "Rellenar inicios de sesión con Bitwarden",
-  "manage.vaultHint": "Botón de la llave en la barra lateral y Ctrl+Mayús+L dentro de una app. Necesita el CLI de Bitwarden (bw).",
+  "manage.vaultHint": "Botón de la llave en la barra lateral y Ctrl+Mayús+L. Necesita el CLI de Bitwarden (bw).",
   "bitwarden.error.disabled": "Bitwarden está desactivado",
 
-  "sidebar.vault": "Bitwarden: rellenar inicio de sesión (Ctrl+Mayús+L dentro de una app)",
+  "sidebar.vault": "Bitwarden: rellenar inicio de sesión (Ctrl+Mayús+L)",
   "vault.title": "Bitwarden",
   "vault.password": "Contraseña maestra",
   "vault.unlock": "Desbloquear",
@@ -444,6 +446,10 @@ const es: Dictionary = {
 };
 
 const pt: Dictionary = {
+  "vault.loading": "Verificando o cofre…",
+  "vault.unlocking": "Desbloqueando o cofre…",
+  "vault.filling": "Buscando e preenchendo o login…",
+
   "music.open": "Abrir YouTube Music",
   "music.progress": "Posição de reprodução",
   "music.enabled": "Mini player do YouTube Music",
@@ -461,9 +467,6 @@ const pt: Dictionary = {
   "sidebar.services": "Apps",
   "sidebar.add": "Adicionar app",
   "sidebar.manage": "Gerenciar apps",
-  "status.loading": "Carregando filtros de anúncios…",
-  "status.ready": "Filtros de anúncios prontos",
-  "status.error": "Bloqueio de anúncios desativado: {message}",
 
   "home.ungrouped": "Apps",
   "home.empty": "Ainda não há apps. Adicione uma com o botão +.",
@@ -640,10 +643,10 @@ const pt: Dictionary = {
   "manage.ci": "Mostrar CI na barra lateral",
   "manage.ciHint": "Os runs do GitHub Actions (builds, deploys…) dos repositórios que você escolher.",
   "manage.vault": "Preencher logins com o Bitwarden",
-  "manage.vaultHint": "Botão da chave na barra lateral e Ctrl+Shift+L dentro de um app. Precisa do CLI do Bitwarden (bw).",
+  "manage.vaultHint": "Botão da chave na barra lateral e Ctrl+Shift+L. Precisa do CLI do Bitwarden (bw).",
   "bitwarden.error.disabled": "O Bitwarden está desativado",
 
-  "sidebar.vault": "Bitwarden: preencher login (Ctrl+Shift+L dentro de um app)",
+  "sidebar.vault": "Bitwarden: preencher login (Ctrl+Shift+L)",
   "vault.title": "Bitwarden",
   "vault.password": "Senha mestra",
   "vault.unlock": "Desbloquear",

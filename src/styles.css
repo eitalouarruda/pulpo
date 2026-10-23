@@ -184,32 +184,6 @@ button {
   border-color: var(--muted);
 }
 
-#status {
-  flex: none;
-  width: 10px;
-  height: 10px;
-  border-radius: 50%;
-  background: var(--muted);
-}
-
-#status[data-state="ready"] {
-  background: var(--ok);
-}
-
-#status[data-state="error"] {
-  background: var(--warn);
-}
-
-#status[data-state="loading"] {
-  animation: pulse 1s ease-in-out infinite alternate;
-}
-
-@keyframes pulse {
-  to {
-    opacity: 0.3;
-  }
-}
-
 /* ------------------------------------------------------------ diálogos */
 
 #overlay {
@@ -2028,7 +2002,7 @@ body.split #music-player {
 #home-view.has-music { padding-bottom: 360px; }
 .music-open { display: flex; flex-direction: column; gap: 12px; border: 0; padding: 0; background: transparent; text-align: left; cursor: pointer; }
 .music-cover { position: relative; height: 118px; width: 100%; display: grid; place-items: center; flex: none; }
-#music-artwork { position: absolute; inset: 0; z-index: -2; width: 100%; height: 100%; object-fit: cover; border-radius: inherit; pointer-events: none; }
+#music-artwork { position: absolute; top: 0; left: 0; z-index: -2; width: 100%; height: auto; aspect-ratio: 1; object-fit: contain; object-position: top center; pointer-events: none; }
 #music-placeholder { color: var(--muted); }
 #music-player svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; flex: none; }
 #music-placeholder svg { width: 36px; height: 36px; }
@@ -2070,3 +2044,13 @@ body.split #music-player {
 #music-player input[type="range"]:disabled { opacity: 0.35; cursor: default; }
 #music-player :focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
 .music-volume .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+.home-app-picker { position: relative; width: min(280px, 100%); min-width: 0; }
+.home-app-picker summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 9px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); cursor: pointer; list-style: none; }
+.home-app-picker summary::-webkit-details-marker { display: none; }
+.home-app-picker summary::after { content: ""; width: 6px; height: 6px; border-right: 1.5px solid var(--muted); border-bottom: 1.5px solid var(--muted); transform: rotate(45deg); flex: none; }
+.home-app-picker[open] summary { border-color: var(--accent); }
+#home-app { position: absolute; top: calc(100% + 5px); left: 0; right: 0; z-index: 5; display: flex; flex-direction: column; max-height: 220px; overflow-y: auto; padding: 4px; border: 1px solid var(--line); border-radius: 9px; background: var(--panel); box-shadow: 0 8px 24px var(--shadow); }
+#home-app button { width: 100%; flex: none; text-align: left; padding: 9px 10px; border: 0; border-radius: 5px; background: transparent; cursor: pointer; }
+#home-app button:hover, #home-app button:focus-visible { background: var(--field); outline: none; }
+#home-app [aria-selected="true"] { color: var(--fg); background: color-mix(in srgb, var(--accent) 20%, var(--panel)); }

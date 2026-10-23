@@ -14,7 +14,9 @@
 //!   principal: un formulario dentro de un iframe no se rellena.
 
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Mutex;
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, Manager};
@@ -25,6 +27,8 @@ pub struct Vault {
     /// Las entradas de la última búsqueda, con contraseña: para rellenar la
     /// elegida sin volver a llamar a `bw`.
     found: Mutex<Option<Found>>,
+    status: Mutex<Option<(Instant, Status)>>,
+    sync_pending: AtomicBool,
 }
 
 struct Found {
@@ -39,7 +43,7 @@ struct Login {
     password: String,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum State {
     /// `bw` no está instalado.
@@ -50,7 +54,7 @@ pub enum State {
     Unlocked,
 }
 
-#[derive(Serialize)]
+#[derive(Clone, Serialize)]
 pub struct Status {
     state: State,
     email: Option<String>,
@@ -94,6 +98,9 @@ fn bw(args: &[&str], session: Option<&str>, password: Option<&str>) -> Result<St
         .arg("--nointeraction")
         .stdin(Stdio::null())
         .env("BW_NOINTERACTION", "true");
+    command
+        .env_remove("BW_SESSION")
+        .env_remove("PULPO_BW_PASSWORD");
     if let Some(session) = session {
         command.env("BW_SESSION", session);
     }
@@ -115,7 +122,8 @@ fn bw(args: &[&str], session: Option<&str>, password: Option<&str>) -> Result<St
             "bitwarden.error.password"
         } else if err.contains("not logged in") || err.contains("You are not logged in") {
             "bitwarden.error.unauthenticated"
-        } else if err.contains("locked") {
+        } else if err.contains("locked") || err.to_ascii_lowercase().contains("invalid session key")
+        {
             "bitwarden.error.locked"
         } else {
             "bitwarden.error.cli"
@@ -130,6 +138,20 @@ fn session(app: &AppHandle) -> Option<String> {
 }
 
 fn status_blocking(app: &AppHandle) -> Result<Status, String> {
+    let vault = app.state::<Vault>();
+    // A busca de logins valida a chave no próprio CLI; não iniciar outro
+    // processo apenas para confirmar uma sessão que o Pulpo já possui.
+    if session(app).is_some() {
+        return Ok(Status {
+            state: State::Unlocked,
+            email: None,
+        });
+    }
+    if let Some((at, status)) = vault.status.lock().unwrap().as_ref() {
+        if matches!(status.state, State::Locked) && at.elapsed() < Duration::from_secs(30) {
+            return Ok(status.clone());
+        }
+    }
     let raw = match bw(&["status"], session(app).as_deref(), None) {
         Err(e) if e == "bitwarden.error.missing" => {
             return Ok(Status {
@@ -145,18 +167,17 @@ fn status_blocking(app: &AppHandle) -> Result<Status, String> {
     })?;
     let state = match status.status.as_str() {
         "unauthenticated" => State::Unauthenticated,
-        // Con una sesión que ya no vale (`bw lock` en una terminal), `bw` dice
-        // "locked": se olvida.
+        // Sem uma chave própria, o CLI normalmente informa "locked".
+        // Sessões invalidadas fora do Pulpo são detectadas pela busca de itens.
         "unlocked" => State::Unlocked,
-        _ => {
-            app.state::<Vault>().session.lock().unwrap().take();
-            State::Locked
-        }
+        _ => State::Locked,
     };
-    Ok(Status {
+    let status = Status {
         state,
         email: status.user_email,
-    })
+    };
+    *vault.status.lock().unwrap() = Some((Instant::now(), status.clone()));
+    Ok(status)
 }
 
 async fn blocking<T: Send + 'static>(
@@ -197,8 +218,10 @@ pub fn bw_set_enabled(app: AppHandle, enabled: bool) {
     }
     if !enabled {
         let vault = app.state::<Vault>();
-        vault.found.lock().unwrap().take();
         let session = vault.session.lock().unwrap().take();
+        vault.found.lock().unwrap().take();
+        vault.status.lock().unwrap().take();
+        vault.sync_pending.store(false, Ordering::Relaxed);
         if let Some(key) = session {
             std::thread::spawn(move || {
                 let _ = bw(&["lock"], Some(&key), None);
@@ -215,6 +238,9 @@ pub async fn bw_status(app: AppHandle) -> Result<Status, String> {
 
 #[tauri::command]
 pub async fn bw_unlock(app: AppHandle, password: String) -> Result<(), String> {
+    if !enabled(&app) {
+        return Err("bitwarden.error.disabled".into());
+    }
     if password.is_empty() {
         return Err("bitwarden.error.password".into());
     }
@@ -227,13 +253,15 @@ pub async fn bw_unlock(app: AppHandle, password: String) -> Result<(), String> {
         if key.is_empty() {
             return Err("bitwarden.error.cli".into());
         }
+        if !enabled(&app) {
+            return Err("bitwarden.error.disabled".into());
+        }
         *app.state::<Vault>().session.lock().unwrap() = Some(key.clone());
-        // Trae lo último del servidor sin hacer esperar al relleno.
-        std::thread::spawn(move || {
-            if let Err(e) = bw(&["sync"], Some(&key), None) {
-                eprintln!("[pulpo] bitwarden: sync falló: {e}");
-            }
-        });
+        app.state::<Vault>().status.lock().unwrap().take();
+        // Sync no compite con la primera búsqueda/descifrado del cofre.
+        app.state::<Vault>()
+            .sync_pending
+            .store(true, Ordering::Relaxed);
         Ok(())
     })
     .await
@@ -242,8 +270,11 @@ pub async fn bw_unlock(app: AppHandle, password: String) -> Result<(), String> {
 #[tauri::command]
 pub async fn bw_lock(app: AppHandle) -> Result<(), String> {
     let vault = app.state::<Vault>();
+    let key = vault.session.lock().unwrap().take();
     vault.found.lock().unwrap().take();
-    let Some(key) = vault.session.lock().unwrap().take() else {
+    vault.status.lock().unwrap().take();
+    vault.sync_pending.store(false, Ordering::Relaxed);
+    let Some(key) = key else {
         return Ok(());
     };
     blocking(move || bw(&["lock"], Some(&key), None).map(|_| ())).await
@@ -269,10 +300,25 @@ pub async fn bw_logins(app: AppHandle, service: String) -> Result<Vec<Entry>, St
     if !enabled(&app) {
         return Err("bitwarden.error.disabled".into());
     }
-    let url = service_url(&app, &service)?;
     blocking(move || {
         let key = session(&app).ok_or("bitwarden.error.locked")?;
-        let raw = bw(&["list", "items", "--url", &url], Some(&key), None)?;
+        let url = service_url(&app, &service)?;
+        let raw = match bw(&["list", "items", "--url", &url], Some(&key), None) {
+            Ok(raw) => raw,
+            Err(e) => {
+                // La sesión pudo bloquearse desde otro cliente/terminal.
+                if e == "bitwarden.error.locked" || e == "bitwarden.error.unauthenticated" {
+                    let vault = app.state::<Vault>();
+                    let mut current = vault.session.lock().unwrap();
+                    if current.as_deref() == Some(&key) {
+                        current.take();
+                        vault.found.lock().unwrap().take();
+                        vault.status.lock().unwrap().take();
+                    }
+                }
+                return Err(e);
+            }
+        };
         let items: Vec<BwItem> = serde_json::from_str(&raw).map_err(|e| {
             eprintln!("[pulpo] bitwarden: lista ilegible: {e}");
             "bitwarden.error.cli".to_string()
@@ -296,11 +342,24 @@ pub async fn bw_logins(app: AppHandle, service: String) -> Result<Vec<Entry>, St
                 password: login.password.unwrap_or_default(),
             });
         }
-        *app.state::<Vault>().found.lock().unwrap() = Some(Found {
+        let vault = app.state::<Vault>();
+        let current = vault.session.lock().unwrap();
+        if current.as_deref() != Some(&key) || !enabled(&app) {
+            return Err("bitwarden.error.locked".into());
+        }
+        *vault.found.lock().unwrap() = Some(Found {
             service,
             url,
             logins,
         });
+        drop(current);
+        if vault.sync_pending.swap(false, Ordering::Relaxed) {
+            std::thread::spawn(move || {
+                if let Err(e) = bw(&["sync"], Some(&key), None) {
+                    eprintln!("[pulpo] bitwarden: sync falló: {e}");
+                }
+            });
+        }
         Ok(entries)
     })
     .await
@@ -316,13 +375,20 @@ fn same_site(a: &str, b: &str) -> bool {
 
 /// Rellena en la app la entrada elegida de la última búsqueda.
 #[tauri::command]
-pub fn bw_fill(app: AppHandle, service: String, id: String) -> Result<(), String> {
+pub async fn bw_fill(app: AppHandle, service: String, id: String) -> Result<(), String> {
+    blocking(move || fill_blocking(&app, &service, &id)).await
+}
+
+fn fill_blocking(app: &AppHandle, service: &str, id: &str) -> Result<(), String> {
+    if !enabled(app) || session(app).is_none() {
+        return Err("bitwarden.error.locked".into());
+    }
     let found = app.state::<Vault>().found.lock().unwrap().take();
     let Some(found) = found.filter(|f| f.service == service) else {
         return Err("bitwarden.error.changed".into());
     };
     // La página pudo navegar mientras se elegía.
-    if !same_site(&found.url, &service_url(&app, &service)?) {
+    if !same_site(&found.url, &service_url(app, service)?) {
         return Err("bitwarden.error.changed".into());
     }
     let login = found
@@ -331,12 +397,19 @@ pub fn bw_fill(app: AppHandle, service: String, id: String) -> Result<(), String
         .find(|l| l.id == id)
         .ok_or("bitwarden.error.changed")?;
     let webview = app
-        .get_webview(&service)
+        .get_webview(service)
         .ok_or("error.unknownService".to_string())?;
     let script = format!(
-        "{FILL_SCRIPT}({}, {})",
+        "{FILL_SCRIPT}({}, {}, {})",
         serde_json::to_string(&login.username).unwrap(),
         serde_json::to_string(&login.password).unwrap(),
+        serde_json::to_string(
+            &tauri::Url::parse(&found.url)
+                .map_err(|_| "bitwarden.error.changed")?
+                .origin()
+                .ascii_serialization()
+        )
+        .unwrap(),
     );
     webview
         .eval(script)
@@ -347,7 +420,8 @@ pub fn bw_fill(app: AppHandle, service: String, id: String) -> Result<(), String
 /// de usuario anterior a ella; sin contraseña a la vista (logins en dos pasos,
 /// como Google o Microsoft), solo el usuario. El valor se pone con el `setter`
 /// nativo y se avisa con `input`/`change`, para que React y compañía lo vean.
-const FILL_SCRIPT: &str = r#"((username, password) => {
+const FILL_SCRIPT: &str = r#"((username, password, origin) => {
+  if (location.origin !== origin) return;
   const visible = (el) =>
     !el.disabled && !el.readOnly && el.getClientRects().length > 0 &&
     getComputedStyle(el).visibility !== "hidden";

@@ -33,7 +33,6 @@
           <path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3h-4l-.3 2.9a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.4 7.4 0 0 0 1.7 1L11 21h4l.3-2.9a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/>
         </svg>
       </button>
-      <div id="status" role="status"></div>
     </aside>
 
     <!-- Dialogs: the sidebar stretches over the whole window while they show. -->
@@ -130,8 +129,11 @@
         </label>
         <p id="music-settings-error" class="error" role="alert" hidden></p>
         <div class="zoom-row home-app-row">
-          <span data-i18n="manage.homeApp"></span>
-          <div id="home-app" class="segmented wrap" role="radiogroup"></div>
+          <span id="home-app-label" data-i18n="manage.homeApp"></span>
+          <details id="home-app-picker" class="home-app-picker">
+            <summary id="home-app-current" aria-haspopup="listbox"></summary>
+            <div id="home-app" role="listbox" aria-labelledby="home-app-label"></div>
+          </details>
         </div>
         <div class="links-box">
           <div class="links-head">
@@ -232,7 +234,7 @@
 
       <form class="card" id="vault-view" hidden autocomplete="off">
         <h2 data-i18n="vault.title"></h2>
-        <p id="vault-message"></p>
+        <p id="vault-message" aria-live="polite"></p>
         <input id="vault-password" type="password" data-i18n-placeholder="vault.password" hidden />
         <div id="vault-list" role="listbox" hidden></div>
         <p id="vault-error" class="error" role="alert"></p>
