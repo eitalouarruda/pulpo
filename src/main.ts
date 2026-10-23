@@ -4,6 +4,7 @@ import { listen } from "@tauri-apps/api/event";
 import { periodOf, pickGreeting } from "./greetings";
 import { applyI18n, currentLanguage, type Language, LANGUAGES, setLanguage, t, tError } from "./i18n";
 import { currentTheme, setTheme, THEMES } from "./theme";
+import { setupMusic } from "./music";
 
 interface Service {
   id: string;
@@ -2419,6 +2420,8 @@ vaultEnabledBox.addEventListener("change", () =>
 );
 showVaultEnabled(await invoke<boolean>("bw_enabled"));
 await listen<boolean>("bw-enabled", ({ payload }) => showVaultEnabled(payload));
+
+await setupMusic(select);
 
 // Al final del arranque, sin esperar: GitHub puede tardar o no responder.
 invoke<{ version: string } | null>("check_update")

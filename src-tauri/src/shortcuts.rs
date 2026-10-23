@@ -43,7 +43,7 @@ pub enum Shortcut {
     Notification,
 }
 
-fn marker() -> &'static str {
+pub(crate) fn marker() -> &'static str {
     static MARKER: OnceLock<String> = OnceLock::new();
     MARKER.get_or_init(|| {
         let nanos = std::time::SystemTime::now()

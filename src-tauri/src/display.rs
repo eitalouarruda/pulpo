@@ -26,6 +26,9 @@ const MAX_HOME_PANE: f64 = 0.92;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Settings {
+    /// Mini reproductor de YouTube Music en la página inicial.
+    #[serde(default)]
+    pub music_player: bool,
     /// Zoom elegido por el usuario, por nombre de pantalla (`eDP-1`, …).
     #[serde(default)]
     pub zoom: HashMap<String, f64>,
@@ -321,8 +324,15 @@ mod tests {
         let path = settings_path(&dir);
         let mut settings = Settings::default();
         settings.zoom.insert("eDP-1".into(), 1.5);
+        settings.music_player = true;
         save(&path, &settings).unwrap();
         assert_eq!(load(&path).zoom.get("eDP-1"), Some(&1.5));
+        assert!(load(&path).music_player);
         std::fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn older_settings_leave_music_disabled() {
+        assert!(!serde_json::from_str::<Settings>("{}").unwrap().music_player);
     }
 }

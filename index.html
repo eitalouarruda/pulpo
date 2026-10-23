@@ -60,6 +60,28 @@
             <p id="home-greeting"></p>
           </div>
         </header>
+        <aside id="music-player" aria-label="YouTube Music" hidden>
+          <img id="music-artwork" alt="" hidden />
+          <button type="button" id="music-open" class="music-open" data-i18n-label="music.open">
+            <span class="music-cover"><span id="music-placeholder"><svg class="" viewBox="0 0 24 24" aria-hidden="true"><path d="M9 18V5l11-2v13M9 8l11-2"/><ellipse cx="6" cy="18" rx="3" ry="2"/><ellipse cx="17" cy="16" rx="3" ry="2"/></svg></span></span>
+            <span class="music-info"><strong id="music-title" data-i18n="music.empty"></strong><small id="music-artist"></small></span>
+          </button>
+          <div class="music-timeline">
+            <div id="music-scrubber" class="music-scrubber">
+              <span class="music-rest" aria-hidden="true"></span>
+              <span class="music-played" aria-hidden="true"><span class="music-wave"></span></span>
+              <input id="music-progress" type="range" min="0" max="1" value="0" step="0.1" data-i18n-label="music.progress" />
+            </div>
+            <div class="music-times"><span id="music-elapsed">0:00</span><span id="music-duration">0:00</span></div>
+          </div>
+          <div class="music-controls">
+            <button type="button" id="music-previous" data-i18n-label="music.previous"><svg class="" viewBox="0 0 24 24" aria-hidden="true"><path d="M6 5v14"/><path d="m18 5-10 7 10 7Z" fill="currentColor" stroke="none"/></svg></button>
+            <button type="button" id="music-toggle" data-i18n-label="music.play"><svg class="music-play-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="m9 5 11 7-11 7Z" fill="currentColor"/></svg><svg class="music-pause-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M8 5v14M16 5v14" stroke="currentColor" stroke-width="3.5"/></svg></button>
+            <button type="button" id="music-next" data-i18n-label="music.next"><svg class="" viewBox="0 0 24 24" aria-hidden="true"><path d="M18 5v14"/><path d="m6 5 10 7-10 7Z" fill="currentColor" stroke="none"/></svg></button>
+          </div>
+          <label class="music-volume"><svg class="" viewBox="0 0 24 24" aria-hidden="true"><path d="m11 5-6 4H2v6h3l6 4ZM15 8a6 6 0 0 1 0 8M18 5a10 10 0 0 1 0 14"/></svg><span class="sr-only" data-i18n="music.volume"></span><input id="music-volume" type="range" min="0" max="100" step="1" data-i18n-label="music.volume" /></label>
+          <small id="music-error" role="status" hidden></small>
+        </aside>
         <div id="home-groups"></div>
         <p class="home-hint" data-i18n-html="home.hint"></p>
       </section>
@@ -102,6 +124,11 @@
             <small data-i18n="manage.vaultHint"></small>
           </span>
         </label>
+        <label class="check">
+          <input id="music-enabled" type="checkbox" />
+          <span><span data-i18n="music.enabled"></span><small data-i18n="music.hint"></small></span>
+        </label>
+        <p id="music-settings-error" class="error" role="alert" hidden></p>
         <div class="zoom-row home-app-row">
           <span data-i18n="manage.homeApp"></span>
           <div id="home-app" class="segmented wrap" role="radiogroup"></div>

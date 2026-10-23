@@ -1,6 +1,19 @@
 /** Interface languages. English is the default and the source of the keys. */
 
 const en = {
+  "music.open": "Open YouTube Music",
+  "music.progress": "Playback position",
+  "music.enabled": "YouTube Music mini player",
+  "music.hint": "Show on home using the YouTube Music session open in Pulpo.",
+  "music.empty": "Open YouTube Music and play a song",
+  "music.play": "Play",
+  "music.pause": "Pause",
+  "music.next": "Next track",
+  "music.previous": "Previous track",
+  "music.volume": "Volume",
+  "music.unavailable": "YouTube Music is unavailable",
+  "music.error": "Could not update the music player",
+
   "sidebar.home": "Home (Esc Esc Esc)",
   "sidebar.services": "Apps",
   "sidebar.add": "Add app",
@@ -211,6 +224,19 @@ export type MessageKey = keyof typeof en;
 type Dictionary = Record<MessageKey, string>;
 
 const es: Dictionary = {
+  "music.open": "Abrir YouTube Music",
+  "music.progress": "Posición de reproducción",
+  "music.enabled": "Mini reproductor de YouTube Music",
+  "music.hint": "Mostrar en inicio usando la sesión de YouTube Music abierta en Pulpo.",
+  "music.empty": "Abre YouTube Music y reproduce una canción",
+  "music.play": "Reproducir",
+  "music.pause": "Pausar",
+  "music.next": "Siguiente canción",
+  "music.previous": "Canción anterior",
+  "music.volume": "Volumen",
+  "music.unavailable": "YouTube Music no está disponible",
+  "music.error": "No se pudo actualizar el reproductor",
+
   "sidebar.home": "Inicio (Esc Esc Esc)",
   "sidebar.services": "Apps",
   "sidebar.add": "Agregar app",
@@ -418,6 +444,19 @@ const es: Dictionary = {
 };
 
 const pt: Dictionary = {
+  "music.open": "Abrir YouTube Music",
+  "music.progress": "Posição de reprodução",
+  "music.enabled": "Mini player do YouTube Music",
+  "music.hint": "Mostrar na página inicial usando a sessão do YouTube Music aberta no Pulpo.",
+  "music.empty": "Abra o YouTube Music e toque uma música",
+  "music.play": "Reproduzir",
+  "music.pause": "Pausar",
+  "music.next": "Próxima música",
+  "music.previous": "Música anterior",
+  "music.volume": "Volume",
+  "music.unavailable": "YouTube Music está indisponível",
+  "music.error": "Não foi possível atualizar o player",
+
   "sidebar.home": "Início (Esc Esc Esc)",
   "sidebar.services": "Apps",
   "sidebar.add": "Adicionar app",

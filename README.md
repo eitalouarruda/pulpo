@@ -55,6 +55,11 @@ session, and ads are blocked with the same engine and filter lists as Brave.
   `xwayland:force_zero_scaling` (Omarchy), Pulpo applies each screen's scale
   itself and switches it when you move the window between screens.
 - **English, Português, Español.**
+- **YouTube Music mini player.** Enable it in Manage apps to show the current
+  track, artwork, playback controls and volume at the bottom left of Home.
+  Drag the progress bar to seek, or click the artwork or track to open the app.
+  It uses the YouTube Music session already open in Pulpo and updates on
+  playback changes without polling. It is disabled by default.
 
 <p align="center">
   <img src="docs/screenshots/app.png" alt="YouTube Music open in Pulpo, without ads" width="900" />

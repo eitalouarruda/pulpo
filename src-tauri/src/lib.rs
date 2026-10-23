@@ -5,6 +5,7 @@ mod display;
 mod dnd;
 mod icons;
 mod links;
+mod music;
 mod platform;
 mod popups;
 mod services;
@@ -703,6 +704,7 @@ pub fn run() {
                 layout: LayoutQueue::default(),
             });
             layout_worker(app.handle());
+            app.manage(music::Player::new(app.handle().clone()));
             #[cfg(target_os = "linux")]
             display::guard_focus(data_dir.join("focus.log"));
             dnd::watch(app.handle());
@@ -793,6 +795,9 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
+            music::music_get,
+            music::music_set_enabled,
+            music::music_control,
             list_services,
             catalog,
             blocker_status,
@@ -1061,6 +1066,8 @@ fn open_service(
     #[cfg(target_os = "linux")]
     let initial_load_tx = Mutex::new(Some(initial_load_tx));
     let id = service.id.clone();
+    let music_tx = app.state::<music::Player>().sender.clone();
+    let music_load_tx = music_tx.clone();
     // La página puso un contador con `navigator.setAppBadge`: manda ese, no el
     // del título (Telegram pone ahí el nombre del chat). Vale hasta la siguiente carga.
     let app_badge = Arc::new(AtomicBool::new(false));
@@ -1087,6 +1094,10 @@ fn open_service(
             .initialization_script(shortcuts::script())
             .initialization_script(dnd::SCRIPT)
             .on_document_title_changed(move |webview: Webview, title| {
+                // No consultar el runtime desde este callback de CEF.
+                if music::receive(&music_tx, &id, &title) {
+                    return;
+                }
                 if let Some(shortcut) = shortcuts::parse(&title) {
                     // Este aviso llega en el hilo de UI del motor web, y `layout` espera
                     // a ese mismo hilo: desde aquí se bloquearía.
@@ -1117,6 +1128,7 @@ fn open_service(
             .on_page_load(move |webview, payload| {
                 if payload.event() == PageLoadEvent::Started {
                     app_badge_load.store(false, Ordering::Relaxed);
+                    music::clear(&music_load_tx, webview.label());
                 }
                 // El estado de no molestar vive en la página: se repone en cada carga.
                 let app = webview.app_handle();
@@ -1175,6 +1187,15 @@ fn open_service(
     #[cfg(target_os = "linux")]
     {
         builder = builder.initialization_script_for_all_frames(links::SCRIPT);
+    }
+    if music::is_music(&service.url) {
+        builder = builder.initialization_script(music::script(
+            app.state::<AppState>()
+                .settings
+                .lock()
+                .unwrap()
+                .music_player,
+        ));
     }
     if let Some(ua) = diag::user_agent() {
         builder = builder.user_agent(&ua);
