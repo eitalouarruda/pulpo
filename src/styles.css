@@ -641,50 +641,6 @@ label.check small {
 
 /* ------------------------------------------------------------ CI */
 
-#ci {
-  position: relative;
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 40px;
-  height: 28px;
-  padding: 0;
-  border: 0;
-  background: none;
-  color: var(--muted);
-  cursor: pointer;
-}
-
-#ci[hidden] {
-  display: none;
-}
-
-#ci:hover,
-#ci:focus-visible {
-  color: var(--fg);
-}
-
-.ci-label {
-  padding: 2px 6px;
-  border: 1.5px solid currentColor;
-  border-radius: 6px;
-  font-size: 11px;
-  font-weight: 700;
-  letter-spacing: 0.04em;
-}
-
-#ci[data-state="running"] {
-  color: var(--warn);
-}
-
-#ci[data-state="fail"] {
-  color: var(--badge);
-}
-
-#ci[data-state="ok"] {
-  color: var(--ok);
-}
-
 #vault {
   flex: none;
   display: grid;
@@ -743,71 +699,6 @@ label.check small {
 .vault-entry span {
   color: var(--muted);
   font-size: 12px;
-}
-
-#ci .badge {
-  position: absolute;
-  top: -7px;
-  right: -2px;
-  min-width: 16px;
-  height: 16px;
-  padding: 0 4px;
-  border-radius: 8px;
-  background: var(--warn);
-  color: #000;
-  font-size: 10px;
-  font-weight: 700;
-  line-height: 16px;
-}
-
-#ci .badge:empty {
-  display: none;
-}
-
-/* CI ocupa el área de las apps, como la página inicial; sus modales van
-   encima, sobre un velo. */
-#overlay.page-mode {
-  position: relative;
-  background: var(--bg);
-}
-
-.page-view {
-  position: absolute;
-  inset: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-  padding: 28px 32px;
-  overflow-y: auto;
-}
-
-.page-view[hidden] {
-  display: none;
-}
-
-.page-view > * {
-  flex-shrink: 0;
-}
-
-.page-view header {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.page-view h2 {
-  flex: 1;
-  margin: 0;
-  font-size: 20px;
-  font-weight: 600;
-}
-
-#overlay.ci-modal-open::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  z-index: 1;
-  background: var(--backdrop);
 }
 
 .ci-modal {
@@ -994,9 +885,6 @@ label.check small {
   display: block;
 }
 
-#ci-empty:empty {
-  display: none;
-}
 
 .ci-account {
   display: flex;
@@ -1969,13 +1857,13 @@ body.has-wallpaper #home-date {
   --line: rgb(255 255 255 / 0.22);
   --active: #ffffff;
   --field: rgb(255 255 255 / 0.12);
-  position: fixed;
+  position: relative;
   isolation: isolate;
-  left: 80px;
-  bottom: 16px;
   z-index: 2;
-  width: min(250px, calc(100% - 96px));
-  max-height: calc(100% - 32px);
+  width: min(250px, 36%);
+  flex: none;
+  min-width: 0;
+  max-height: min(360px, 45cqh);
   overflow: hidden auto;
   padding: 14px;
   border: 1px solid var(--line);
@@ -1995,11 +1883,6 @@ body.has-wallpaper #home-date {
   background: linear-gradient(180deg, rgb(0 0 0 / 0.08), rgb(0 0 0 / 0.2) 24%, rgb(0 0 0 / 0.78) 53%, rgb(0 0 0 / 0.94));
 }
 #music-player[hidden] { display: none; }
-body.split #music-player {
-  bottom: calc(100% * var(--pane, 0.5) + 16px);
-  max-height: calc(100% * (1 - var(--pane, 0.5)) - 32px);
-}
-#home-view.has-music { padding-bottom: 360px; }
 .music-open { display: flex; flex-direction: column; gap: 12px; border: 0; padding: 0; background: transparent; text-align: left; cursor: pointer; }
 .music-cover { position: relative; height: 118px; width: 100%; display: grid; place-items: center; flex: none; }
 #music-artwork { position: absolute; top: 0; left: 0; z-index: -2; width: 100%; height: auto; aspect-ratio: 1; object-fit: contain; object-position: top center; pointer-events: none; }
@@ -2054,3 +1937,65 @@ body.split #music-player {
 #home-app button { width: 100%; flex: none; text-align: left; padding: 9px 10px; border: 0; border-radius: 5px; background: transparent; cursor: pointer; }
 #home-app button:hover, #home-app button:focus-visible { background: var(--field); outline: none; }
 #home-app [aria-selected="true"] { color: var(--fg); background: color-mix(in srgb, var(--accent) 20%, var(--panel)); }
+
+/* Inicio: apps arriba y widgets anclados al borde inferior. */
+#home-dashboard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 24px;
+  align-items: start;
+  min-width: 0;
+}
+#home-dashboard > * { min-width: 0; }
+#home-dock {
+  position: fixed;
+  left: 80px;
+  right: 16px;
+  bottom: 16px;
+  z-index: 2;
+  display: flex;
+  align-items: flex-end;
+  gap: 16px;
+  pointer-events: none;
+}
+#home-dock > * { pointer-events: auto; }
+body.split #home-dock { bottom: calc(100% * var(--pane, 0.5) + 16px); }
+#home-ci {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-width: 0;
+  max-width: 560px;
+  max-height: min(360px, 45cqh);
+  margin-left: auto;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: color-mix(in srgb, var(--panel) 75%, transparent);
+  backdrop-filter: blur(12px);
+  color: var(--fg);
+  text-shadow: none;
+}
+#home-ci[hidden] { display: none; }
+#ci-runs { min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
+#home-ci #ci-runs li { background: transparent; }
+#home-ci #ci-runs li:hover { background: var(--field); }
+#ci-runs .m-text { min-width: 0; }
+#ci-runs .m-text strong, #ci-runs .m-text small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#ci-runs li { flex-wrap: wrap; }
+#ci-runs .ci-time { margin-left: auto; }
+.ci-settings { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 16px; }
+.ci-settings .check { flex: 1; min-width: min(240px, 100%); }
+#home-view,
+body.split #home-view,
+body.split.pane-tight #home-view {
+  padding-bottom: calc(var(--home-dock-height, 0px) + 32px);
+}
+@container (max-width: 520px) {
+  #home-dock { left: 72px; right: 8px; gap: 8px; }
+  #music-player { padding: 10px; }
+  .music-cover { height: 64px; }
+  .music-controls { gap: 6px; }
+  #home-ci { padding: 4px; }
+  #ci-runs li { padding: 6px 4px; gap: 6px; }
+}

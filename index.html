@@ -18,10 +18,6 @@
           <path d="M9 2v14M2 9h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
         </svg>
       </button>
-      <button id="ci" type="button" hidden data-i18n-title="sidebar.ci" data-i18n-label="sidebar.ci">
-        <span class="ci-label">CI</span>
-        <span class="badge"></span>
-      </button>
       <button id="vault" type="button" hidden data-i18n-title="sidebar.vault" data-i18n-label="sidebar.vault">
         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
           <circle cx="8" cy="15" r="4" fill="none" stroke="currentColor" stroke-width="2" />
@@ -59,6 +55,10 @@
             <p id="home-greeting"></p>
           </div>
         </header>
+        <div id="home-dashboard">
+          <div id="home-groups"></div>
+        </div>
+        <div id="home-dock">
         <aside id="music-player" aria-label="YouTube Music" hidden>
           <img id="music-artwork" alt="" hidden />
           <button type="button" id="music-open" class="music-open" data-i18n-label="music.open">
@@ -81,8 +81,10 @@
           <label class="music-volume"><svg class="" viewBox="0 0 24 24" aria-hidden="true"><path d="m11 5-6 4H2v6h3l6 4ZM15 8a6 6 0 0 1 0 8M18 5a10 10 0 0 1 0 14"/></svg><span class="sr-only" data-i18n="music.volume"></span><input id="music-volume" type="range" min="0" max="100" step="1" data-i18n-label="music.volume" /></label>
           <small id="music-error" role="status" hidden></small>
         </aside>
-        <div id="home-groups"></div>
-        <p class="home-hint" data-i18n-html="home.hint"></p>
+          <section id="home-ci" data-i18n-label="ci.title" hidden>
+            <ul id="ci-runs"></ul>
+          </section>
+        </div>
       </section>
 
       <div class="context-menu" id="menu-view" role="menu" hidden></div>
@@ -109,13 +111,16 @@
           <button type="button" class="ghost-btn" id="zoom-auto" data-i18n-title="zoom.reset" data-i18n="zoom.auto"></button>
         </div>
         <ul id="manage-list"></ul>
-        <label class="check">
-          <input id="ci-enabled" type="checkbox" />
-          <span>
-            <span data-i18n="manage.ci"></span>
-            <small data-i18n="manage.ciHint"></small>
-          </span>
-        </label>
+        <div class="ci-settings">
+          <label class="check">
+            <input id="ci-enabled" type="checkbox" />
+            <span>
+              <span data-i18n="manage.ci"></span>
+              <small data-i18n="manage.ciHint"></small>
+            </span>
+          </label>
+          <button type="button" class="ghost-btn" id="ci-setup-open" data-i18n="ci.setup"></button>
+        </div>
         <label class="check">
           <input id="vault-enabled" type="checkbox" />
           <span>
@@ -159,16 +164,6 @@
           <button type="button" class="ghost-btn" id="wallpaper-open" data-i18n="wallpaper.choose"></button>
         </div>
         <p class="hint" data-i18n="manage.hint"></p>
-      </section>
-
-      <!-- CI ocupa el área de las apps, como una más. Sus modales van encima. -->
-      <section id="ci-view" class="page-view" hidden>
-        <header>
-          <h2 data-i18n="ci.title"></h2>
-          <button type="button" class="ghost-btn" id="ci-setup-open" data-i18n="ci.setup"></button>
-        </header>
-        <ul id="ci-runs"></ul>
-        <p id="ci-empty" class="hint"></p>
       </section>
 
       <!-- Fondo de pantalla (inicio, CI y diálogos): página completa; arriba fijo, abajo los

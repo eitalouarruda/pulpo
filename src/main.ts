@@ -63,12 +63,17 @@ const views = {
   confirm: $("#confirm-view"),
   switcher: $("#switcher-view"),
   update: $("#update-view"),
-  ci: $("#ci-view"),
   wallpaper: $("#wallpaper-view"),
   ciSetup: $("#ci-setup-view"),
   ciToken: $<HTMLFormElement>("#ci-token-view"),
   vault: $<HTMLFormElement>("#vault-view"),
 };
+// Reservar el alto real de los widgets para poder desplazar todas las apps.
+const homeDock = $("#home-dock");
+new ResizeObserver(() => {
+  views.home.style.setProperty("--home-dock-height", `${homeDock.getBoundingClientRect().height}px`);
+}).observe(homeDock);
+
 const form = {
   title: $("#form-title"),
   name: $<HTMLInputElement>("#f-name"),
@@ -423,20 +428,14 @@ function syncHomePane() {
   invoke("set_home_pane_visible", { visible }).catch(console.error);
 }
 
-/// Modales de CI: se abren encima de la página de CI, que sigue visible.
-const isCiModal = (v: View | null) => v === "ciSetup" || v === "ciToken";
-
 function openOverlay(view: View) {
   for (const [name, el] of Object.entries(views)) {
-    el.hidden = name !== view && !(name === "ci" && isCiModal(view));
+    el.hidden = name !== view;
   }
   if (!overlay.hidden) syncHomePane();
   overlay.classList.toggle("menu-mode", view === "menu");
   overlay.classList.toggle("home-mode", view === "home");
   overlay.classList.toggle("wallpaper-mode", view === "wallpaper");
-  // Páginas completas (CI, fondo de pantalla), no tarjetas.
-  overlay.classList.toggle("page-mode", view === "ci" || isCiModal(view));
-  overlay.classList.toggle("ci-modal-open", isCiModal(view));
   if (!overlay.hidden) return;
   invoke("set_overlay", { open: true })
     .catch(console.error)
@@ -490,7 +489,6 @@ function closeOverlay() {
 }
 
 function currentView(): View | null {
-  // Al revés: con un modal de CI abierto, la página de CI también se ve.
   for (const [name, el] of Object.entries(views).reverse()) {
     if (!el.hidden) return name as View;
   }
@@ -1673,9 +1671,8 @@ interface CiRepo {
 }
 
 const ci = {
-  button: $("#ci"),
+  panel: $("#home-ci"),
   runs: $("#ci-runs"),
-  empty: $("#ci-empty"),
   tree: $("#ci-tree"),
   error: $("#ci-error"),
   repoSearch: $<HTMLInputElement>("#ci-repo-search"),
@@ -1690,6 +1687,7 @@ const ci = {
   tokenOk: $<HTMLButtonElement>("#ci-token-ok"),
 };
 let ciRuns: CiRun[] = [];
+let ciEnabled = false;
 let ciAccounts: CiAccount[] = [];
 /// Repos a los que llegan los tokens (null: sin cargar todavía).
 let ciRepos: CiRepo[] | null = null;
@@ -1730,25 +1728,12 @@ function ciDuration(r: CiRun): string {
 
 const repoName = (repo: string) => repo.split("/").pop() ?? repo;
 
-function renderCiButton() {
-  const active = ciRuns.filter((r) => r.status !== "completed").length;
-  ci.button.querySelector(".badge")!.textContent = active > 0 ? String(active) : "";
-  const finished = ciRuns.filter((r) => r.status === "completed").map(ciState);
-  ci.button.dataset.state = active
-    ? "running"
-    : finished.includes("fail")
-      ? "fail"
-      : finished.includes("ok")
-        ? "ok"
-        : "";
-}
-
 function renderCi() {
-  renderCiButton();
+  const activeRuns = ciRuns.filter((r) => r.status !== "completed");
+  ci.panel.hidden = !ciEnabled || activeRuns.length === 0;
   ci.runs.replaceChildren(
-    ...ciRuns.map((r) => {
+    ...activeRuns.map((r) => {
       const li = document.createElement("li");
-      li.classList.toggle("finished", r.status === "completed");
       li.title = r.url;
       const dot = document.createElement("span");
       dot.className = "ci-dot";
@@ -1770,35 +1755,16 @@ function renderCi() {
       elapsed.textContent = ciDuration(r);
       time.append(elapsed);
       li.append(dot, text, time);
-      // Terminados: se pueden quitar. Los fallidos no se van solos.
-      if (r.status === "completed") {
-        const dismiss = document.createElement("button");
-        dismiss.className = "ci-dismiss";
-        dismiss.textContent = "✕";
-        dismiss.title = t("ci.remove");
-        dismiss.addEventListener("click", (e) => {
-          e.stopPropagation();
-          invoke("ci_dismiss", { id: r.id }).catch(console.error);
-        });
-        li.append(dismiss);
-      }
       li.addEventListener("click", () => invoke("ci_open", { url: r.url }).catch(console.error));
       return li;
     }),
   );
-  const watched = ciRepos ? ciRepos.some((r) => r.watched) : ciAccounts.length > 0;
-  ci.empty.textContent = ciRuns.length
-    ? ""
-    : !ciAccounts.length
-      ? t("ci.noAccounts")
-      : !watched
-        ? t("ci.noRepos")
-        : t("ci.empty");
+
 }
 
 /// Con la vista abierta, los tiempos de los runs en marcha avanzan solos.
 setInterval(() => {
-  if (overlay.hidden || currentView() !== "ci") return;
+  if (overlay.hidden || currentView() !== "home") return;
   for (const r of ciRuns) {
     if (r.status === "completed") continue;
     const small = ci.runs.querySelector(`.ci-time[data-id="${r.id}"] small`);
@@ -1918,12 +1884,11 @@ function loadCiRepos() {
     });
 }
 
-/// Configuración (tokens y repos), en un modal encima de la página de CI: al
-/// cerrarse vuelve a ella.
+/// Configuración de tokens y repos; al cerrarse vuelve a los ajustes.
 function openCiSetup() {
   ci.error.textContent = "";
   loadCiRepos();
-  returnTo = "ci";
+  returnTo = "manage";
   openOverlay("ciSetup");
 }
 
@@ -1976,12 +1941,6 @@ function checkToken() {
     });
 }
 
-ci.button.addEventListener("click", () => {
-  renderCi();
-  openOverlay("ci");
-  // Sin tokens no hay nada que ver: directo a la configuración.
-  if (!ciAccounts.length) openCiSetup();
-});
 $("#ci-setup-open").addEventListener("click", openCiSetup);
 $("#ci-token-open").addEventListener("click", openCiToken);
 ci.repoSearch.addEventListener("input", renderCiTree);
@@ -2017,8 +1976,9 @@ overlay.addEventListener("click", (e) => {
 
 const ciEnabledBox = $<HTMLInputElement>("#ci-enabled");
 function showCiEnabled(enabled: boolean) {
-  ci.button.hidden = !enabled;
+  ciEnabled = enabled;
   ciEnabledBox.checked = enabled;
+  renderCi();
 }
 ciEnabledBox.addEventListener("change", () =>
   invoke("ci_set_enabled", { enabled: ciEnabledBox.checked }).catch(console.error),
