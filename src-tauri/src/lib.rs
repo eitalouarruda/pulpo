@@ -900,6 +900,22 @@ const CANVAS_SCRIPT: &str = r#"(() => {
   }).observe(document, { childList: true });
 })();"#;
 
+/// `outerWidth`/`outerHeight` iguales al tamaño del webview, como un navegador
+/// a pantalla completa. Al ser hijo de la ventana, el motor da el tamaño de la
+/// ventana entera (barra lateral, panel de inicio…) y páginas que comparan
+/// `outer*` con `inner*` para detectar DevTools (DevPulse: más de 180 px)
+/// creían tenerlas abiertas.
+const OUTER_SIZE_SCRIPT: &str = r#"(() => {
+  for (const [outer, inner] of [["outerWidth", "innerWidth"], ["outerHeight", "innerHeight"]]) {
+    Object.defineProperty(window, outer, {
+      get: () => window[inner],
+      set: () => {},
+      configurable: true,
+      enumerable: true,
+    });
+  }
+})();"#;
+
 /// Carpeta del perfil (cookies, sesión, caché) de un servicio.
 fn profile_dir(app: &AppHandle, id: &str) -> Option<PathBuf> {
     let data = app.path().app_data_dir().ok()?;
@@ -1084,6 +1100,7 @@ fn open_service(
             // al arrancar; `CANVAS_SCRIPT` cubre los recreados después.
             .background_color(tauri::window::Color(255, 255, 255, 255))
             .initialization_script(CANVAS_SCRIPT)
+            .initialization_script(OUTER_SIZE_SCRIPT)
             // Notificaciones permitidas: la app la añadió el usuario (como en
             // Rambox) y "No molestar" las silencia. WebView2 no tiene dónde
             // aceptarlas y las dejaba bloqueadas; CEF ya las permitía.
