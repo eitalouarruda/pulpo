@@ -160,6 +160,10 @@
           <div id="theme" class="segmented" role="radiogroup"></div>
         </div>
         <div class="zoom-row">
+          <span data-i18n="whatsnew.title"></span>
+          <button type="button" class="ghost-btn" id="whatsnew-open" data-i18n="whatsnew.open"></button>
+        </div>
+        <div class="zoom-row">
           <span data-i18n="wallpaper.title"></span>
           <button type="button" class="ghost-btn" id="wallpaper-open" data-i18n="wallpaper.choose"></button>
         </div>
@@ -279,6 +283,11 @@
           <small class="dnd-hint" data-i18n="form.themeHint"></small>
         </div>
         <div class="field">
+          <span class="field-label" data-i18n="volume.title"></span>
+          <div id="f-volume"></div>
+          <small class="dnd-hint" data-i18n="volume.hint"></small>
+        </div>
+        <div class="field">
           <span class="field-label" data-i18n="dnd.title"></span>
           <div id="f-dnd-list"></div>
           <button type="button" class="ghost-btn dnd-add" id="f-dnd-add" data-i18n="dnd.add"></button>
@@ -300,6 +309,14 @@
           <button type="button" class="ghost" id="update-later" data-close data-i18n="update.later"></button>
           <button type="button" id="update-install" data-i18n="update.install"></button>
         </footer>
+      </section>
+
+      <section class="card" id="whatsnew-view" hidden>
+        <header>
+          <h2 id="whatsnew-title"></h2>
+          <button type="button" class="ghost-btn" data-close data-i18n="manage.close"></button>
+        </header>
+        <div id="whatsnew-list"></div>
       </section>
 
       <section class="card" id="confirm-view" hidden>

@@ -5,6 +5,7 @@ import { periodOf, pickGreeting } from "./greetings";
 import { applyI18n, currentLanguage, type Language, LANGUAGES, setLanguage, t, tError } from "./i18n";
 import { currentTheme, setTheme, THEMES } from "./theme";
 import { setupMusic } from "./music";
+import { WHATS_NEW } from "./whatsnew";
 
 interface Service {
   id: string;
@@ -19,6 +20,9 @@ interface Service {
   dnd?: Dnd;
   /// Tema que la app ve como preferido (como `services::Theme`).
   theme?: AppTheme;
+  /// Volumen de 0 a 100 (100 si falta) y sin sonido (como en `services.rs`).
+  volume?: number;
+  muted?: boolean;
 }
 
 type AppTheme = "auto" | "light" | "dark";
@@ -63,6 +67,7 @@ const views = {
   confirm: $("#confirm-view"),
   switcher: $("#switcher-view"),
   update: $("#update-view"),
+  whatsnew: $("#whatsnew-view"),
   wallpaper: $("#wallpaper-view"),
   ciSetup: $("#ci-setup-view"),
   ciToken: $<HTMLFormElement>("#ci-token-view"),
@@ -178,19 +183,44 @@ function showBase(leave = false) {
   }
 }
 
+/// Orden de la página inicial (ids), aparte del de la barra lateral.
+let homeOrder: string[] = [];
+
+/// Las apps en el orden de la página inicial; las que no tienen sitio guardado
+/// van al final, en el de la barra lateral.
+function homeSorted() {
+  const pos = (id: string, i: number) => {
+    const p = homeOrder.indexOf(id);
+    return p < 0 ? homeOrder.length + i : p;
+  };
+  return services
+    .map((s, i) => ({ s, p: pos(s.id, i) }))
+    .sort((a, b) => a.p - b.p)
+    .map(({ s }) => s);
+}
+
+/// Mientras se arrastra en la página inicial no se redibuja (los contadores
+/// llegan en cualquier momento); al soltar se redibuja siempre.
+let homeDragging = false;
+
 function renderHome() {
+  if (homeDragging) return;
   const home = $("#home-groups");
   const groups = new Map<string | null, Service[]>();
-  for (const s of services) {
+  // Las secciones salen en el orden en que aparece su primera app.
+  for (const s of homeSorted()) {
     const g = s.group ?? null;
     groups.set(g, [...(groups.get(g) ?? []), s]);
   }
   const sections = [...groups].map(([group, list]) => {
     const section = document.createElement("section");
     section.className = "home-group";
+    if (group !== null) section.dataset.group = group;
     if (group !== null || groups.size > 1) {
       const h = document.createElement("h3");
       h.textContent = group ?? t("home.ungrouped");
+      // Arrastrando el título se mueve la sección entera.
+      h.draggable = true;
       section.append(h);
     }
     const grid = document.createElement("div");
@@ -199,6 +229,8 @@ function renderHome() {
       const tile = document.createElement("button");
       tile.type = "button";
       tile.className = "home-app";
+      tile.dataset.id = s.id;
+      tile.draggable = true;
       tile.classList.toggle("disabled", !s.enabled);
       tile.title = s.enabled ? s.name : t("service.disabledTitle", { name: s.name });
       const icon = document.createElement("span");
@@ -232,6 +264,66 @@ function renderHome() {
   }
   home.replaceChildren(...sections);
 }
+
+// Reordenar la página inicial arrastrando: apps (a otra sección cambia su
+// grupo) o secciones enteras por su título.
+let homeDragged: HTMLElement | null = null;
+const homeGroups = $("#home-groups");
+homeGroups.addEventListener("dragstart", (e) => {
+  const target = e.target as HTMLElement;
+  homeDragged = target.closest(".home-group h3")
+    ? target.closest<HTMLElement>(".home-group")
+    : target.closest<HTMLElement>(".home-app");
+  if (!homeDragged) return;
+  homeDragging = true;
+  homeDragged.classList.add("dragging");
+});
+homeGroups.addEventListener("dragover", (e) => {
+  if (!homeDragged) return;
+  e.preventDefault();
+  const target = e.target as HTMLElement;
+  if (homeDragged.classList.contains("home-group")) {
+    const over = target.closest<HTMLElement>(".home-group");
+    if (!over || over === homeDragged) return;
+    const { top, height } = over.getBoundingClientRect();
+    over[e.clientY < top + height / 2 ? "before" : "after"](homeDragged);
+    return;
+  }
+  const over = target.closest<HTMLElement>(".home-app");
+  if (over) {
+    if (over === homeDragged) return;
+    const { left, width } = over.getBoundingClientRect();
+    over[e.clientX < left + width / 2 ? "before" : "after"](homeDragged);
+    return;
+  }
+  // En el hueco de una sección: al final de ella.
+  const grid = target.closest(".home-group")?.querySelector(".home-grid");
+  if (grid && homeDragged.parentElement !== grid) grid.append(homeDragged);
+});
+homeGroups.addEventListener("dragend", () => {
+  homeDragged?.classList.remove("dragging");
+  homeDragged = null;
+  homeDragging = false;
+  const tiles = [...homeGroups.querySelectorAll<HTMLElement>(".home-app")];
+  const order = tiles.map((tile) => tile.dataset.id!);
+  if (order.join() !== homeSorted().map((s) => s.id).join()) {
+    homeOrder = order;
+    invoke("set_home_order", { order }).catch(console.error);
+  }
+  // Apps soltadas en otra sección: cambian de grupo (también en la barra lateral).
+  const groupOf = new Map(
+    tiles.map((tile) => [tile.dataset.id!, tile.closest<HTMLElement>(".home-group")?.dataset.group ?? null]),
+  );
+  if (services.some((s) => groupOf.has(s.id) && groupOf.get(s.id) !== (s.group ?? null))) {
+    const regrouped = services.map((s) => ({
+      id: s.id,
+      group: groupOf.has(s.id) ? groupOf.get(s.id)! : (s.group ?? null),
+    }));
+    invoke("reorder_services", { order: regrouped }).catch(console.error);
+  }
+  // Lo que llegó mientras tanto, y el orden ya guardado.
+  renderHome();
+});
 
 // ---------------------------------------------------------------- reloj y saludo
 
@@ -311,6 +403,7 @@ function serviceButton(s: Service, index: number) {
   badge.textContent = count > 0 ? String(count) : "";
   button.append(badge);
   if (dndActive.has(s.id)) button.append(dndMark());
+  if (s.muted || s.volume === 0) button.append(mutedMark());
 
   button.addEventListener("click", () => select(s.id));
   button.addEventListener("auxclick", (e) => {
@@ -331,6 +424,73 @@ function dndMark() {
   mark.title = t("dnd.active");
   return mark;
 }
+
+/// Altavoz tachado en la esquina del icono de una app sin sonido.
+function mutedMark() {
+  const mark = document.createElement("span");
+  mark.className = "muted-mark";
+  mark.textContent = "🔇";
+  mark.title = t("volume.off");
+  return mark;
+}
+
+/// Control de volumen de una app: botón de silencio, barra y porcentaje. Mientras
+/// se arrastra solo se prueba en la página; al soltar se guarda. `onChange`
+/// sustituye al guardado (el formulario guarda al enviar).
+function volumeControl(
+  id: string | null,
+  init: { volume: number; muted: boolean },
+  onChange?: (volume: number, muted: boolean) => void,
+) {
+  let volume = init.volume;
+  let muted = init.muted;
+  const box = document.createElement("div");
+  box.className = "volume";
+  const mute = document.createElement("button");
+  mute.type = "button";
+  mute.className = "volume-mute";
+  const range = document.createElement("input");
+  range.type = "range";
+  range.min = "0";
+  range.max = "100";
+  range.step = "5";
+  range.value = String(volume);
+  range.setAttribute("aria-label", t("volume.title"));
+  const label = document.createElement("span");
+  label.className = "volume-value";
+  const paint = () => {
+    const off = muted || volume === 0;
+    mute.textContent = off ? "🔇" : volume < 50 ? "🔉" : "🔊";
+    mute.title = t(muted ? "volume.unmute" : "volume.mute");
+    mute.setAttribute("aria-pressed", String(muted));
+    box.classList.toggle("off", off);
+    label.textContent = `${volume}%`;
+  };
+  const save = () => {
+    if (onChange) onChange(volume, muted);
+    else if (id) invoke("set_service_volume", { id, volume, muted }).catch(console.error);
+  };
+  mute.addEventListener("click", () => {
+    muted = !muted;
+    paint();
+    save();
+  });
+  range.addEventListener("input", () => {
+    volume = Number(range.value);
+    // Mover la barra devuelve el sonido.
+    muted = false;
+    paint();
+    if (id && !onChange) {
+      invoke("preview_service_volume", { id, volume, muted }).catch(console.error);
+    }
+  });
+  range.addEventListener("change", save);
+  paint();
+  box.append(mute, range, label);
+  return box;
+}
+
+const volumeOf = (s: Service) => ({ volume: s.volume ?? 100, muted: !!s.muted });
 
 /// Pone el icono (imagen o inicial con color) dentro de `el`.
 function fillIcon(el: HTMLElement, s: Pick<Service, "name" | "color" | "icon">) {
@@ -361,6 +521,8 @@ function renderSidebar() {
       header.title = t(collapsed.has(g) ? "group.toggle.expand" : "group.toggle.collapse", { group: g });
       header.setAttribute("aria-expanded", String(!collapsed.has(g)));
       header.textContent = g;
+      // Arrastrando el título se mueve el grupo entero.
+      header.draggable = true;
       const unread = services
         .filter((x) => x.group === g)
         .reduce((n, x) => n + (badges.get(x.id) ?? 0), 0);
@@ -376,16 +538,49 @@ function renderSidebar() {
   nav.replaceChildren(...items);
 }
 
-// Reordenar arrastrando.
+// Reordenar arrastrando: una app, o un grupo entero por su título.
 let dragged: HTMLElement | null = null;
+
+/// El título de un grupo y sus apps de la barra, hasta el siguiente título.
+function groupBlock(header: HTMLElement) {
+  const block = [header];
+  let next = header.nextElementSibling as HTMLElement | null;
+  while (next && !next.classList.contains("group")) {
+    block.push(next);
+    next = next.nextElementSibling as HTMLElement | null;
+  }
+  return block;
+}
+
+/// El título del grupo en que está `el` (`null`: las apps sin grupo, arriba).
+function headerOf(el: HTMLElement) {
+  let prev: HTMLElement | null = el;
+  while (prev && !prev.classList.contains("group")) prev = prev.previousElementSibling as HTMLElement | null;
+  return prev;
+}
+
 nav.addEventListener("dragstart", (e) => {
-  dragged = (e.target as HTMLElement).closest(".service");
+  dragged = (e.target as HTMLElement).closest(".service, .group");
   dragged?.classList.add("dragging");
 });
 nav.addEventListener("dragover", (e) => {
   e.preventDefault();
   const over = (e.target as HTMLElement).closest<HTMLElement>(".service, .group");
   if (!dragged || !over || over === dragged) return;
+  if (dragged.classList.contains("group")) {
+    const block = groupBlock(dragged);
+    if (block.includes(over)) return;
+    const target = headerOf(over);
+    // Las apps sin grupo van siempre arriba: el grupo pasa a ser el primero.
+    if (!target) return nav.querySelector(".group")?.before(...block);
+    const { top, height } = over.getBoundingClientRect();
+    if (over === target && e.clientY < top + height / 2) target.before(...block);
+    else {
+      const end = groupBlock(target);
+      end[end.length - 1].after(...block);
+    }
+    return;
+  }
   // Soltar sobre el título de un grupo mete la app al principio de ese grupo.
   if (over.classList.contains("group")) return over.after(dragged);
   const { top, height } = over.getBoundingClientRect();
@@ -394,12 +589,22 @@ nav.addEventListener("dragover", (e) => {
 nav.addEventListener("dragend", () => {
   dragged?.classList.remove("dragging");
   dragged = null;
-  // El grupo de cada app es el del último título que tiene encima.
+  // El grupo de cada app es el del último título que tiene encima. Las de un
+  // grupo plegado (no están en la barra) van tras su título.
   const order: { id: string; group: string | null }[] = [];
+  const seen = new Set<string>();
   let group: string | null = null;
   for (const el of nav.children as HTMLCollectionOf<HTMLElement>) {
-    if (el.classList.contains("group")) group = el.dataset.group!;
-    else order.push({ id: el.dataset.id!, group });
+    if (el.classList.contains("group")) {
+      group = el.dataset.group!;
+      if (!collapsed.has(group)) continue;
+      for (const s of services.filter((x) => x.group === group)) {
+        order.push({ id: s.id, group });
+        seen.add(s.id);
+      }
+    } else if (!seen.has(el.dataset.id!)) {
+      order.push({ id: el.dataset.id!, group });
+    }
   }
   // Las apps de grupos plegados no están en la barra: siguen igual.
   for (const s of services) {
@@ -578,7 +783,7 @@ function renderManage() {
       ]
         .filter(Boolean)
         .join(" · ");
-      text.append(name, meta);
+      text.append(name, meta, volumeControl(s.id, volumeOf(s)));
 
       const button = (label: string, cls: string, onClick: () => void) => {
         const b = document.createElement("button");
@@ -677,6 +882,8 @@ function openMenu(s: Service, top: number, left?: number) {
       checked: homeApp === s.id,
       disabled: !s.enabled,
     }),
+    sep(),
+    volumeControl(s.id, volumeOf(s)),
     sep(),
     ...dndItems(s, item),
     sep(),
@@ -883,9 +1090,12 @@ interface FormInit {
   icon_source?: IconSource;
   dnd?: Dnd;
   theme?: AppTheme;
+  volume?: number;
+  muted?: boolean;
 }
 
 let formTheme: AppTheme = "auto";
+let formVolume = { volume: 100, muted: false };
 
 function renderFormTheme() {
   $("#f-theme").replaceChildren(
@@ -987,6 +1197,10 @@ function openForm(init: FormInit, edit: string | null) {
   renderSchedules();
   formTheme = init.theme ?? "auto";
   renderFormTheme();
+  formVolume = { volume: init.volume ?? 100, muted: !!init.muted };
+  $("#f-volume").replaceChildren(
+    volumeControl(null, formVolume, (volume, muted) => (formVolume = { volume, muted })),
+  );
   iconChoice = { source: init.icon_source ?? "web", icon: init.icon ?? null };
   renderIconPreview();
   form.error.textContent = "";
@@ -1181,6 +1395,12 @@ views.form.addEventListener("submit", async (e) => {
     const schedules = formSchedules.filter((sched) => sched.days.length > 0);
     if (JSON.stringify(schedules) !== JSON.stringify(before?.dnd?.schedules ?? [])) {
       await invoke("set_dnd_schedules", { id, schedules });
+    }
+    if (
+      formVolume.volume !== (before?.volume ?? 100) ||
+      formVolume.muted !== !!before?.muted
+    ) {
+      await invoke("set_service_volume", { id, ...formVolume });
     }
     const iconChanged =
       !before ||
@@ -1511,6 +1731,7 @@ tickClock();
 sendTrayTexts();
 
 homeApp = await invoke<string | null>("get_home_app");
+homeOrder = await invoke<string[]>("get_home_order");
 applyPaneSize(await invoke<number>("get_home_pane_size"));
 services = await invoke<Service[]>("list_services");
 dndActive = new Set(await invoke<string[]>("dnd_active"));
@@ -1523,8 +1744,20 @@ await listen<string | null>("home-app-changed", (e) => {
   homeApp = e.payload;
   syncHomePane();
 });
+/// Total sin leer de las apps activas, en el icono de la barra de tareas.
+let appBadge = 0;
+function syncAppBadge() {
+  const total = services
+    .filter((s) => s.enabled)
+    .reduce((n, s) => n + (badges.get(s.id) ?? 0), 0);
+  if (total === appBadge) return;
+  appBadge = total;
+  invoke("set_app_badge", { count: total }).catch(console.error);
+}
+
 await listen<Service[]>("services-changed", (e) => {
   services = e.payload;
+  syncAppBadge();
   if (homeApp && !services.some((s) => s.id === homeApp && s.enabled)) {
     document.body.classList.remove("split");
   } else {
@@ -1539,6 +1772,7 @@ await listen<Service[]>("services-changed", (e) => {
 });
 await listen<{ id: string; count: number }>("badge", ({ payload }) => {
   badges.set(payload.id, payload.count);
+  syncAppBadge();
   // El contador de un grupo plegado suma los de sus apps.
   const group = services.find((s) => s.id === payload.id)?.group;
   if (group && collapsed.has(group)) return renderSidebar();
@@ -2451,6 +2685,59 @@ showVaultEnabled(await invoke<boolean>("bw_enabled"));
 await listen<boolean>("bw-enabled", ({ payload }) => showVaultEnabled(payload));
 
 await setupMusic(select);
+
+// Novedades: tras actualizar se muestran las que no había visto (ver `whats_new.rs`).
+let whatsNewVersions: Record<string, string> = {};
+
+/// Las entradas `ids` (todas si es `null`), cada una con su versión y fecha.
+function showWhatsNew(ids: string[] | null, version?: string) {
+  $("#whatsnew-title").textContent = version
+    ? t("whatsnew.titleVersion", { version })
+    : t("whatsnew.title");
+  const lang = currentLanguage();
+  $("#whatsnew-list").replaceChildren(
+    ...WHATS_NEW.filter((entry) => !ids || ids.includes(entry.id)).map((entry) => {
+      const section = document.createElement("section");
+      section.className = "whatsnew-entry";
+      const h = document.createElement("h3");
+      const seen = whatsNewVersions[entry.id];
+      const date = new Date(`${entry.id}T12:00:00`).toLocaleDateString(lang, {
+        day: "numeric",
+        month: "long",
+        year: "numeric",
+      });
+      h.textContent = seen ? `${t("whatsnew.version", { version: seen })} · ${date}` : date;
+      const list = document.createElement("ul");
+      list.append(
+        ...entry.items[lang].map((text) => {
+          const li = document.createElement("li");
+          li.textContent = text;
+          return li;
+        }),
+      );
+      section.append(h, list);
+      return section;
+    }),
+  );
+  openOverlay("whatsnew");
+}
+
+$("#whatsnew-open").addEventListener("click", () => {
+  returnTo = "manage";
+  showWhatsNew(null);
+});
+
+try {
+  const news = await invoke<{ version: string; fresh: string[]; versions: Record<string, string> }>(
+    "whats_new_check",
+    { ids: WHATS_NEW.map((entry) => entry.id) },
+  );
+  whatsNewVersions = news.versions;
+  const view = overlay.hidden ? null : currentView();
+  if (news.fresh.length && (view === null || isBase(view))) showWhatsNew(news.fresh, news.version);
+} catch (e) {
+  console.error(e);
+}
 
 // Al final del arranque, sin esperar: GitHub puede tardar o no responder.
 invoke<{ version: string } | null>("check_update")

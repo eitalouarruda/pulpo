@@ -32,6 +32,20 @@ pub struct Service {
     /// Tema que la app ve como preferido (`prefers-color-scheme`).
     #[serde(default, skip_serializing_if = "Theme::is_auto")]
     pub theme: Theme,
+    /// Volumen de la app, de 0 a 100 (ver `volume`).
+    #[serde(default = "full_volume", skip_serializing_if = "is_full_volume")]
+    pub volume: u8,
+    /// Sin sonido, sin perder el volumen elegido.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub muted: bool,
+}
+
+pub fn full_volume() -> u8 {
+    100
+}
+
+fn is_full_volume(volume: &u8) -> bool {
+    *volume == 100
 }
 
 /// Tema preferido que se le dice a una app. Las que siguen el del navegador
@@ -204,6 +218,8 @@ fn defaults() -> Vec<Service> {
             enabled: true,
             dnd: Dnd::default(),
             theme: Theme::Auto,
+            volume: full_volume(),
+            muted: false,
         },
         Service {
             id: "ytmusic".into(),
@@ -217,6 +233,8 @@ fn defaults() -> Vec<Service> {
             enabled: true,
             dnd: Dnd::default(),
             theme: Theme::Auto,
+            volume: full_volume(),
+            muted: false,
         },
     ]
 }

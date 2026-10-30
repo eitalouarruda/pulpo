@@ -1,3 +1,4 @@
+mod badge;
 mod bitwarden;
 mod ci;
 mod diag;
@@ -8,13 +9,16 @@ mod links;
 mod music;
 mod platform;
 mod popups;
+mod quit;
 mod services;
 mod shortcuts;
 mod spellcheck;
 #[cfg(windows)]
 mod tray;
 mod update;
+mod volume;
 mod wallpaper;
+mod whats_new;
 
 use std::collections::BTreeSet;
 use std::path::PathBuf;
@@ -275,6 +279,8 @@ fn add_service(
             enabled: true,
             dnd: Dnd::default(),
             theme,
+            volume: services::full_volume(),
+            muted: false,
         };
         list.push(service.clone());
         service
@@ -368,6 +374,31 @@ fn set_dnd_schedules(
 #[tauri::command]
 fn silence_service(app: AppHandle, id: String, until: Option<i64>) -> Result<(), String> {
     change_dnd(&app, &id, |dnd| dnd.until = until)
+}
+
+/// Guarda el volumen de una app y lo aplica enseguida.
+#[tauri::command]
+fn set_service_volume(app: AppHandle, id: String, volume: u8, muted: bool) -> Result<(), String> {
+    let level = {
+        let state = app.state::<AppState>();
+        let mut list = state.services.lock().unwrap();
+        let service = list
+            .iter_mut()
+            .find(|s| s.id == id)
+            .ok_or("error.unknownService")?;
+        service.volume = volume.min(100);
+        service.muted = muted;
+        volume::level(service)
+    };
+    services_changed(&app);
+    volume::apply_level(&app, &id, level);
+    Ok(())
+}
+
+/// Aplica un volumen sin guardarlo, mientras se arrastra el control.
+#[tauri::command]
+fn preview_service_volume(app: AppHandle, id: String, volume: u8, muted: bool) {
+    volume::apply_level(&app, &id, volume::level_of(volume, muted));
 }
 
 #[tauri::command]
@@ -482,6 +513,24 @@ fn get_home_app(state: tauri::State<'_, AppState>) -> Option<String> {
     state.settings.lock().unwrap().home_app.clone()
 }
 
+#[tauri::command]
+fn get_home_order(state: tauri::State<'_, AppState>) -> Vec<String> {
+    state.settings.lock().unwrap().home_order.clone()
+}
+
+/// Guarda el orden de las apps de la página inicial (ver `Settings::home_order`).
+#[tauri::command]
+fn set_home_order(state: tauri::State<'_, AppState>, order: Vec<String>) {
+    let mut settings = state.settings.lock().unwrap();
+    settings.home_order = order;
+    if let Err(e) = display::save(&state.settings_path, &settings) {
+        eprintln!(
+            "[pulpo] no se pudo guardar {}: {e}",
+            state.settings_path.display()
+        );
+    }
+}
+
 /// Elige la app de la mitad inferior de la página inicial (`None`: ninguna).
 #[tauri::command]
 fn set_home_app(app: AppHandle, id: Option<String>) {
@@ -585,18 +634,11 @@ async fn install_update(app: AppHandle) -> Result<(), String> {
     })
     .await
     .map_err(|e| e.to_string())??;
-    // Que la versión nueva encuentre las cookies que las páginas acaban de
-    // renovar (ver `platform::flush_cookies`).
-    #[cfg(target_os = "linux")]
-    {
-        let webviews: Vec<_> = app.webviews().into_values().collect();
-        tauri::async_runtime::spawn_blocking(move || {
-            platform::flush_cookies(&webviews, Duration::from_secs(5))
-        })
+    // Como al salir: las cookies que las páginas acaban de renovar quedan
+    // guardadas para la versión nueva (ver `quit`).
+    tauri::async_runtime::spawn_blocking(move || quit::quit(&app))
         .await
         .map_err(|e| e.to_string())?;
-    }
-    app.exit(0);
     Ok(())
 }
 
@@ -662,6 +704,13 @@ pub fn run() {
     });
     #[cfg(windows)]
     let builder = builder.runtime(tauri_runtime_wry::Wry::default());
+    // Windows: abrir Pulpo con otro ya en la bandeja arrancaba uno más (cada uno
+    // con su icono y peleando por los mismos archivos); ahora muestra el que ya
+    // estaba. Solo en release: la instancia de pruebas convive con la de verdad.
+    #[cfg(all(windows, not(debug_assertions)))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _, _| {
+        tray::show(app)
+    }));
     builder
         // Sin su script de enlaces: cancela los clics en `target="_blank"` y pide
         // abrirlos por IPC, que las apps remotas no tienen, así que no se abría
@@ -676,6 +725,7 @@ pub fn run() {
             let config_path = services::config_path(&data_dir);
             let settings_path = display::settings_path(&data_dir);
             let settings = display::load(&settings_path);
+            whats_new::set_first_run(!config_path.exists());
             let list = services::load(&config_path);
             // En modo benchmark YouTube Music tiene que estar visible: el motor
             // no pinta (ni corre requestAnimationFrame) en webviews ocultos.
@@ -751,6 +801,9 @@ pub fn run() {
                 })
             };
             window.add_child(shell)?;
+            // Pulpo abierto, todavía sin nada por leer (ver `badge`).
+            #[cfg(target_os = "linux")]
+            badge::publish(app.handle(), 0);
             #[cfg(windows)]
             tray::create(app.handle())?;
             let handle = app.handle().clone();
@@ -763,6 +816,13 @@ pub fn run() {
                     WindowEvent::CloseRequested { api, .. } => {
                         api.prevent_close();
                         let _ = tray_window.hide();
+                    }
+                    // Linux: cerrar la ventana sale de Pulpo, sin dejar el motor web
+                    // vivo (ver `quit`).
+                    #[cfg(not(windows))]
+                    WindowEvent::CloseRequested { api, .. } => {
+                        api.prevent_close();
+                        quit::quit_async(&handle);
                     }
                     // Al pasar a otra pantalla cambia el zoom (y con él el layout).
                     WindowEvent::Moved(_) => update_zoom(&handle, false),
@@ -816,6 +876,8 @@ pub fn run() {
             set_overlay,
             get_home_app,
             set_home_app,
+            get_home_order,
+            set_home_order,
             set_home_pane_visible,
             get_home_pane_size,
             set_home_pane_size,
@@ -824,6 +886,10 @@ pub fn run() {
             set_dnd_schedules,
             silence_service,
             dnd_active,
+            set_service_volume,
+            badge::set_app_badge,
+            whats_new::whats_new_check,
+            preview_service_volume,
             check_update,
             install_update,
             bitwarden::bw_enabled,
@@ -854,8 +920,13 @@ pub fn run() {
             wallpaper::wallpaper_search,
             wallpaper::wallpaper_download,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while running tauri application")
+        .run(|app, event| {
+            if let tauri::RunEvent::Exit = event {
+                quit::on_exit(app);
+            }
+        });
 }
 
 /// `$XDG_DATA_HOME`, o `~/.local/share`: lo mismo que usa Tauri para
@@ -886,11 +957,46 @@ fn set_tray_texts(app: AppHandle, show: String, quit: String) {
 /// Fondo de la página para las que no pintan el suyo: `Canvas` es blanco, u
 /// oscuro si la página declara `color-scheme: dark`. Con `:where` no pesa
 /// nada: cualquier fondo de la página manda.
+///
+/// Solo se aplica si la página no pinta ni `html` ni `body`: el fondo del
+/// `body` cubre toda la página solo si `html` no tiene uno, y YouTube Music
+/// (oscuro en el `body`, de 112 px de alto) quedaba blanco por debajo. Se
+/// revisa otra vez cuando cambian sus atributos (tema) o sus hojas de estilo.
 const CANVAS_SCRIPT: &str = r#"(() => {
   const add = () => {
+    const html = document.documentElement;
     const style = document.createElement("style");
     style.textContent = ":where(html) { background-color: Canvas; }";
-    document.documentElement.prepend(style);
+    html.prepend(style);
+    const clear = (el) => {
+      const color = getComputedStyle(el).backgroundColor;
+      return color === "transparent" || color === "rgba(0, 0, 0, 0)";
+    };
+    let queued = false;
+    const check = () => {
+      queued = false;
+      if (!document.body) return;
+      style.disabled = true;
+      style.disabled = !(clear(html) && clear(document.body));
+    };
+    const later = () => {
+      if (!queued) (queued = true), setTimeout(check, 50);
+    };
+    const watched = new WeakSet();
+    const observer = new MutationObserver(() => {
+      for (const el of [document.head, document.body]) {
+        if (!el || watched.has(el)) continue;
+        watched.add(el);
+        observer.observe(el, { attributes: true, childList: el === document.head });
+      }
+      later();
+    });
+    observer.observe(html, { attributes: true, childList: true });
+    document.addEventListener("DOMContentLoaded", later);
+    window.addEventListener("load", later);
+    // Hojas de estilo que llegan después (el evento no sube, pero se captura).
+    document.addEventListener("load", (e) => e.target instanceof HTMLLinkElement && later(), true);
+    setTimeout(later, 3000);
   };
   if (document.documentElement) return add();
   new MutationObserver((_, observer) => {
@@ -1110,6 +1216,7 @@ fn open_service(
             })
             .initialization_script(shortcuts::script())
             .initialization_script(dnd::SCRIPT)
+            .initialization_script_for_all_frames(volume::SCRIPT)
             .on_document_title_changed(move |webview: Webview, title| {
                 // No consultar el runtime desde este callback de CEF.
                 if music::receive(&music_tx, &id, &title) {
@@ -1150,6 +1257,7 @@ fn open_service(
                 // El estado de no molestar vive en la página: se repone en cada carga.
                 let app = webview.app_handle();
                 dnd::apply(app, webview.label(), dnd::is_active(app, webview.label()));
+                volume::apply(app, webview.label());
                 // Chromium guarda el zoom por dominio: al cambiar de página vuelve al
                 // que tuviera ese dominio, así que se repone.
                 let _ = webview.set_zoom(current_zoom(webview.app_handle()));

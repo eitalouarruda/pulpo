@@ -51,9 +51,18 @@ libloading = "0.8"
 blocker = { path = "crates/blocker" }
 # Icono en la bandeja del sistema: al cerrar, Pulpo sigue ahí (ver `tray.rs`).
 tauri = { version = "=3.0.0-alpha.4", features = ["unstable", "tray-icon"] }
+# Una sola instancia: abrir Pulpo otra vez muestra la que sigue en la bandeja.
+tauri-plugin-single-instance = "=3.0.0-alpha.3"
 tauri-runtime-wry = { version = "=3.0.0-alpha.4", features = ["unstable"] }
 webview2-com = "0.39"
-windows = { version = "0.62", features = ["Win32_System_Com", "Win32_Globalization"] }
+windows = { version = "0.62", features = [
+    "Win32_Foundation",
+    "Win32_Globalization",
+    "Win32_System_Com",
+    # Terminar los navegadores de WebView2 que sigan vivos al salir (ver `quit`).
+    "Win32_System_Diagnostics_ToolHelp",
+    "Win32_System_Threading",
+] }
 windows-core = "0.62"
 
 [profile.release]

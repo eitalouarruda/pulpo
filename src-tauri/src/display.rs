@@ -50,6 +50,14 @@ pub struct Settings {
     /// Fondo de la página inicial: un archivo de `<datos>/wallpapers`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wallpaper: Option<String>,
+    /// Orden de las apps en la página inicial, aparte del de la barra lateral
+    /// (que es el de `services.json`). Las que no están van al final.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub home_order: Vec<String>,
+    /// Novedades ya vistas: id de la entrada → versión con la que llegó (ver
+    /// `whats_new`).
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub whats_new: std::collections::BTreeMap<String, String>,
 }
 
 impl Settings {

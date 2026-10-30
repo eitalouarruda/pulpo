@@ -141,8 +141,15 @@ button {
   filter: grayscale(1);
 }
 
-.service.dragging {
+.service.dragging,
+.group.dragging,
+.home-app.dragging,
+.home-group.dragging {
   opacity: 0.2;
+}
+
+.home-group h3[draggable="true"] {
+  cursor: grab;
 }
 
 .service .badge {
@@ -1414,6 +1421,91 @@ body.split.pane-tight #home-greeting {
   font-size: 12px;
 }
 
+/* ------------------------------------------------------------ volumen */
+
+.muted-mark {
+  position: absolute;
+  left: -5px;
+  bottom: -5px;
+  width: 17px;
+  height: 17px;
+  border: 1px solid var(--line);
+  border-radius: 50%;
+  background: var(--panel);
+  font-size: 9px;
+  line-height: 15px;
+  text-align: center;
+}
+
+.volume {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: none;
+}
+
+.context-menu .volume {
+  padding: 2px 4px;
+}
+
+.volume .volume-mute,
+.context-menu .volume .volume-mute {
+  flex: none;
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  justify-content: center;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  font-size: 15px;
+  line-height: 1;
+}
+
+.volume .volume-mute:hover {
+  background: var(--field);
+}
+
+.volume input[type="range"] {
+  flex: 1;
+  width: 110px;
+  min-width: 70px;
+  margin: 0;
+  accent-color: var(--accent);
+}
+
+.m-text .volume {
+  margin: 2px 0 0 -6px;
+}
+
+.m-text .volume input[type="range"] {
+  flex: 0 1 160px;
+}
+
+.m-text .volume .volume-mute {
+  width: 24px;
+  height: 24px;
+  font-size: 13px;
+}
+
+#f-volume .volume input[type="range"] {
+  width: auto;
+  max-width: 260px;
+}
+
+.volume-value {
+  width: 3.2em;
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+.volume.off input[type="range"],
+.volume.off .volume-value {
+  opacity: 0.45;
+}
+
 /* ------------------------------------------------------------ no molestar */
 
 .dnd-mark {
@@ -1998,4 +2090,36 @@ body.split.pane-tight #home-view {
   .music-controls { gap: 6px; }
   #home-ci { padding: 4px; }
   #ci-runs li { padding: 6px 4px; gap: 6px; }
+}
+
+/* ------------------------------------------------------------ novedades */
+
+#whatsnew-view {
+  overflow: hidden;
+}
+
+#whatsnew-list {
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.whatsnew-entry h3 {
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.whatsnew-entry ul {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 0;
+  padding-left: 18px;
+  line-height: 1.45;
 }

@@ -202,6 +202,17 @@ fn download(release: &Release, path: &Path, progress: impl Fn(Progress)) -> Resu
 
 /// Linux: pone la AppImage en su sitio (ejecutable), borra la vieja si se
 /// llama distinto y arranca la nueva cuando Pulpo termine.
+/// Ya se lanzó la versión nueva: al salir no hay que terminar los procesos de
+/// Chromium que queden (ver `quit`), de eso se encarga `RELAUNCH` antes de
+/// arrancarla.
+#[cfg(not(windows))]
+static RELAUNCHING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+#[cfg(not(windows))]
+pub fn relaunching() -> bool {
+    RELAUNCHING.load(std::sync::atomic::Ordering::SeqCst)
+}
+
 #[cfg(not(windows))]
 fn finish(partial: &Path, destination: &Path, _current: &str) -> Result<(), String> {
     use std::os::unix::fs::PermissionsExt;
@@ -242,6 +253,7 @@ fn finish(partial: &Path, destination: &Path, _current: &str) -> Result<(), Stri
         .process_group(0)
         .spawn()
         .map_err(|e| e.to_string())?;
+    RELAUNCHING.store(true, std::sync::atomic::Ordering::SeqCst);
     Ok(())
 }
 

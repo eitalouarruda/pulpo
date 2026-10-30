@@ -228,6 +228,13 @@ pub async fn wallpaper_search(
         "random" | "date_added" | "views" | "favorites" => sorting,
         _ => "toplist".to_string(),
     };
+    // `toplist` solo mira el último mes: con texto dejaba fuera casi todo
+    // ("cyberpunk city": 10 contra 1630). Al buscar, lo popular de siempre.
+    let sorting = if sorting == "toplist" && !query.trim().is_empty() {
+        "favorites".to_string()
+    } else {
+        sorting
+    };
     tauri::async_runtime::spawn_blocking(move || {
         let page = page.max(1).to_string();
         let mut request = agent()
