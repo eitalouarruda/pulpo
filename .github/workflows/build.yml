@@ -364,9 +364,131 @@ jobs:
             src-tauri/target/release/bundle/msi/*.msi \
             --clobber --repo "${{ github.repository }}"
 
+  # Build real en ambas arquitecturas, también en PR; el test de ejecución
+  # sigue siendo una comprobación del paquete antes de publicar.
+  build-macos:
+    name: Build macOS (${{ matrix.arch }})
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [macos-15, macos-15-intel]
+        include:
+          - platform: macos-15
+            arch: aarch64
+          - platform: macos-15-intel
+            arch: x64
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: 90
+    env:
+      # Firma ad-hoc; Developer ID y notarización se configuran aparte.
+      APPLE_SIGNING_IDENTITY: '-'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          # CEF copies make target/ too large; keep the Cargo download cache.
+          cache-targets: false
+      - name: Cache CEF
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/tauri-cef
+          key: cef-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+      - run: pnpm install --frozen-lockfile
+      - name: Set release version
+        shell: bash
+        run: |
+          node -e '
+            const fs = require("fs");
+            const p = "src-tauri/tauri.conf.json";
+            const c = JSON.parse(fs.readFileSync(p, "utf8"));
+            const base = c.version.split(".").slice(0, 2).join(".");
+            c.version = base + "." + process.env.GITHUB_RUN_NUMBER;
+            fs.writeFileSync(p, JSON.stringify(c, null, 2));
+            fs.appendFileSync(process.env.GITHUB_ENV, "VERSION=" + c.version + "\n");
+          '
+      - name: Build frontend
+        run: pnpm build
+      - name: Test Brave blocker and WebKit rule exporter
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p macos-logs
+          cargo test --locked --manifest-path src-tauri/Cargo.toml -p blocker --all-features 2>&1 | tee macos-logs/blocker.log
+      - name: Check macOS application targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo clippy --locked --manifest-path src-tauri/Cargo.toml --workspace --all-targets -- -D warnings 2>&1 | tee macos-logs/check.log
+      - name: Test workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --workspace 2>&1 | tee macos-logs/tests.log
+      - name: Build application bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm tauri build --bundles app,dmg 2>&1 | tee macos-logs/bundle.log
+      - name: Verify bundle signature and CEF helpers
+        shell: bash
+        run: |
+          set -euo pipefail
+          app=src-tauri/target/release/bundle/macos/Pulpo.app
+          test "$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$app/Contents/Info.plist")" = "$VERSION"
+          test -d "$app/Contents/Frameworks/Chromium Embedded Framework.framework"
+          test -d "$app/Contents/Frameworks/Pulpo Helper (Renderer).app"
+          codesign --verify --deep --strict --verbose=2 "$app" 2>&1 | tee macos-logs/signature.log
+      - name: Smoke test Chromium, session isolation and file drops
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/smoke-cef.mjs src-tauri/target/release/bundle/macos/Pulpo.app/Contents/MacOS/pulpo 2>&1 | tee macos-logs/smoke.log
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-logs-${{ matrix.arch }}
+          path: macos-logs/
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Upload macOS installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-installers-${{ matrix.arch }}
+          path: src-tauri/target/release/bundle/dmg/*.dmg
+          if-no-files-found: error
+          compression-level: 0
+
+  upload-macos:
+    needs: [release, build-macos]
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.release.outputs.version }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: macos-installers-*
+          merge-multiple: true
+      - name: Upload macOS installers to release
+        run: gh release upload "v$VERSION" *.dmg --clobber --repo "${{ github.repository }}"
+
   # Publica la release solo si todo terminó bien.
   publish:
-    needs: [release, smoke-linux, build-windows]
+    needs: [release, smoke-linux, build-windows, upload-macos]
     runs-on: ubuntu-24.04
     permissions:
       contents: write

@@ -14,6 +14,14 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-11-03-macos-release",
+    items: {
+      en: ["macOS installers for Apple Silicon and Intel are now included in releases alongside Linux and Windows."],
+      es: ["Los instaladores de macOS para Apple Silicon e Intel se incluyen en las releases junto con Linux y Windows."],
+      pt: ["Os instaladores de macOS para Apple Silicon e Intel agora fazem parte das releases, junto com Linux e Windows."],
+    },
+  },
+  {
     id: "2026-11-03-macos-files",
     items: {
       en: [

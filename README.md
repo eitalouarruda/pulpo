@@ -6,7 +6,7 @@
 
 <p align="center">
   All your web apps in one window, without ads.<br />
-  Built with Rust and Tauri for Linux and Windows, with Brave's ad-blocking engine.
+  Built with Rust and Tauri for Linux, Windows and macOS, with Brave's ad-blocking engine.
 </p>
 
 <p align="center">
@@ -121,8 +121,12 @@ Download the latest release from
   menu. It bundles its own Chromium, so it works on any recent distro.
 - **Windows**: `Pulpo_<version>_x64-setup.exe` (or the `.msi`). It uses
   WebView2, which already comes with Windows.
+- **macOS 13+**: `Pulpo_<version>_aarch64.dmg` for Apple Silicon or
+  `Pulpo_<version>_x64.dmg` for Intel. Open the disk image and drag Pulpo to
+  Applications. It bundles Chromium (CEF). The app currently uses an ad-hoc
+  signature; Developer ID notarization is still pending.
 
-**Updates.** When Pulpo starts it checks the latest GitHub release and, if
+**Updates.** On Linux and Windows, Pulpo checks the latest GitHub release and, if
 there's a newer one, asks before doing anything. If you say yes it downloads
 it and restarts on the new version: the AppImage replaces itself (only one
 file is left, and AppImageLauncher's menu entry follows it); on Windows the
@@ -184,18 +188,19 @@ cd src-tauri
 cargo run --release -p blocker --example inspect --features content-blocking -- https://music.youtube.com/
 ```
 
-Every push to `main` builds and publishes a GitHub release with the AppImage
-(built on Arch and smoke-tested on Ubuntu before publishing) and the Windows
-installers.
+Every push to `main` runs the main **Build** workflow and publishes a GitHub
+release with the AppImage (built on Arch and smoke-tested on Ubuntu), Windows
+installers, and macOS DMGs for Intel and Apple Silicon. Publication waits for
+all platforms and the macOS installer uploads to succeed.
 
-### Experimental macOS builds
+### macOS builds and validation
 
-The separate **macOS compatibility** workflow runs on pushes, relevant pull
-requests, or manually from Actions. It builds Intel and Apple Silicon `.app`
-bundles using CEF/Chromium and the same Brave blocker as Linux. Download the
-`pulpo-experimental-*` artifacts from a successful run. These builds use an
-ad-hoc signature for testing; they are not notarized distribution releases.
-The minimum configured macOS version is 13; CI currently runs macOS 15.
+The **Build macOS** jobs in the main workflow also run on pull requests and
+manual workflow runs. They build versioned `.app` bundles and `.dmg` installers
+using CEF/Chromium and the same Brave blocker as Linux. Installers are available
+as `macos-installers-*` workflow artifacts and, for releases, on the release
+page alongside Linux and Windows. The minimum configured macOS version is 13;
+CI currently runs macOS 15.
 
 The workflow checks Rust, the blocker, the bundle signature and CEF helpers,
 then starts the real app and verifies navigation, isolated cookies/storage,
