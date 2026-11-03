@@ -208,7 +208,7 @@ fn download(release: &Release, path: &Path, progress: impl Fn(Progress)) -> Resu
 #[cfg(not(windows))]
 static RELAUNCHING: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
 pub fn relaunching() -> bool {
     RELAUNCHING.load(std::sync::atomic::Ordering::SeqCst)
 }

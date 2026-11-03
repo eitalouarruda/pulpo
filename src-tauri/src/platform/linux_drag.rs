@@ -19,7 +19,7 @@ use tauri_runtime_cef::cef::{ImplBrowser, ImplBrowserHost};
 use tauri_runtime_cef::{allocate_devtools_message_id, DevToolsProtocol, WebviewCefExt};
 use x11_dl::xlib;
 
-use super::linux::{send, UiThread};
+use super::cef::{send, UiThread};
 
 /// Cada cuánto se mira el puntero (unos 60 Hz).
 const POLL: Duration = Duration::from_millis(16);

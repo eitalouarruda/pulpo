@@ -44,7 +44,7 @@ pub fn quit(app: &AppHandle) {
     for webview in &webviews {
         let _ = webview.eval(SILENCE);
     }
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     crate::platform::flush_cookies(&webviews, Duration::from_secs(5));
     #[cfg(windows)]
     {
@@ -54,7 +54,7 @@ pub fn quit(app: &AppHandle) {
         }
         win::wait_or_terminate(&children, Duration::from_secs(4));
     }
-    #[cfg(not(any(target_os = "linux", windows)))]
+    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
     let _ = (webviews, Duration::ZERO);
     app.exit(0);
 }

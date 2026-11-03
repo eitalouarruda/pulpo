@@ -14,6 +14,23 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-11-03-macos-files",
+    items: {
+      en: [
+        "External file drops on Linux are forwarded to the visible web app, including attachment drop zones. Windows explicitly enables native file drops.",
+        "Experimental macOS support with Chromium (CEF), separate sessions and Brave ad blocking; Intel and Apple Silicon builds are tested in GitHub Actions.",
+      ],
+      es: [
+        "Los archivos arrastrados desde el explorador en Linux se entregan a la app visible, incluidas las zonas para adjuntar. Windows habilita explícitamente el arrastre nativo de archivos.",
+        "Soporte experimental de macOS con Chromium (CEF), sesiones separadas y bloqueo de Brave; builds Intel y Apple Silicon en GitHub Actions.",
+      ],
+      pt: [
+        "Arquivos arrastados do explorador no Linux são encaminhados ao app visível, incluindo áreas de anexos. No Windows, o recebimento nativo de arquivos fica explicitamente habilitado.",
+        "Suporte experimental ao macOS com Chromium (CEF), sessões separadas e bloqueio Brave; builds Intel e Apple Silicon no GitHub Actions.",
+      ],
+    },
+  },
+  {
     id: "2026-11-03",
     items: {
       en: ["The home mini player now also works with Spotify (open.spotify.com), besides YouTube Music. Spotify is also in the app catalog."],

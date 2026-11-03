@@ -1,4 +1,4 @@
-//! Linux: Chromium (CEF). El bloqueo de red usa el dominio `Fetch` del
+//! Linux y macOS: Chromium (CEF). El bloqueo de red usa el dominio `Fetch` del
 //! DevTools Protocol: cada petición se pausa, se consulta el motor de Brave y
 //! se continúa o se cancela con `BlockedByClient`.
 
@@ -82,6 +82,7 @@ pub fn attach(
     if let Err(e) = set_theme(webview, theme) {
         eprintln!("[pulpo] {url}: no se pudo fijar el tema: {e}");
     }
+    #[cfg(target_os = "linux")]
     if let Err(e) = super::enable_drag(webview) {
         eprintln!("[pulpo] {url}: arrastrar y soltar no disponible: {e}");
     }

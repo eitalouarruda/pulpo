@@ -7,7 +7,7 @@ pub const LANGUAGES: &[&str] = &["en-US", "es", "pt-BR"];
 
 /// Linux (CEF): lista de diccionarios del perfil; Chromium los descarga la
 /// primera vez que hacen falta.
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub fn dictionaries() -> serde_json::Value {
     serde_json::json!(LANGUAGES)
 }

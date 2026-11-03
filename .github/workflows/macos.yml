@@ -1,0 +1,116 @@
+name: macOS compatibility
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/macos.yml'
+      - 'src-tauri/**'
+      - 'src/**'
+      - 'public/**'
+      - 'index.html'
+      - 'package.json'
+      - 'pnpm-lock.yaml'
+      - 'pnpm-workspace.yaml'
+      - 'tsconfig.json'
+      - 'vite.config.ts'
+      - 'scripts/smoke-cef.mjs'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  compatibility:
+    name: macOS (${{ matrix.platform }})
+    strategy:
+      fail-fast: false
+      matrix:
+        platform: [macos-15, macos-15-intel]
+    runs-on: ${{ matrix.platform }}
+    timeout-minutes: 60
+    env:
+      # Firma ad-hoc para los tests; distribución notarizada se configura aparte.
+      APPLE_SIGNING_IDENTITY: '-'
+    steps:
+      - uses: actions/checkout@v5
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+          # CEF copies make target/ too large; keep the Cargo download cache.
+          cache-targets: false
+      - name: Cache CEF
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/tauri-cef
+          key: cef-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('src-tauri/Cargo.lock') }}
+      - run: pnpm install --frozen-lockfile
+      - name: Build frontend
+        run: pnpm build
+      - name: Test Brave blocker and WebKit rule exporter
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p macos-logs
+          cargo test --locked --manifest-path src-tauri/Cargo.toml -p blocker --all-features 2>&1 | tee macos-logs/blocker.log
+      - name: Check macOS application targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo clippy --locked --manifest-path src-tauri/Cargo.toml --workspace --all-targets -- -D warnings 2>&1 | tee macos-logs/check.log
+      - name: Test workspace
+        shell: bash
+        run: |
+          set -euo pipefail
+          cargo test --locked --manifest-path src-tauri/Cargo.toml --workspace 2>&1 | tee macos-logs/tests.log
+      - name: Build application bundle
+        shell: bash
+        run: |
+          set -euo pipefail
+          pnpm tauri build --bundles app 2>&1 | tee macos-logs/bundle.log
+      - name: Verify bundle signature and CEF helpers
+        shell: bash
+        run: |
+          set -euo pipefail
+          app=src-tauri/target/release/bundle/macos/Pulpo.app
+          test -d "$app/Contents/Frameworks/Chromium Embedded Framework.framework"
+          test -d "$app/Contents/Frameworks/Pulpo Helper (Renderer).app"
+          codesign --verify --deep --strict --verbose=2 "$app" 2>&1 | tee macos-logs/signature.log
+      - name: Smoke test Chromium, session isolation and file drops
+        shell: bash
+        run: |
+          set -euo pipefail
+          node scripts/smoke-cef.mjs src-tauri/target/release/bundle/macos/Pulpo.app/Contents/MacOS/pulpo 2>&1 | tee macos-logs/smoke.log
+      - name: Upload diagnostics
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-logs-${{ matrix.platform }}
+          path: macos-logs/
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: Upload experimental application
+        # A bundle is only available once all preceding checks and build pass.
+        # Archive it before upload to preserve executable modes and symlinks.
+        run: tar -czf macos-app.tar.gz -C src-tauri/target/release/bundle/macos Pulpo.app
+      - name: Upload application artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: pulpo-experimental-${{ matrix.platform }}
+          path: macos-app.tar.gz
+          if-no-files-found: error
+

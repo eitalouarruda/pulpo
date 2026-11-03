@@ -3,7 +3,10 @@
 
 // En Linux el mismo binario hace de proceso auxiliar de Chromium (renderer,
 // GPU...): la macro despacha esos procesos antes de arrancar la app.
-#[cfg_attr(target_os = "linux", tauri_runtime_cef::cef_entry_point)]
+#[cfg_attr(
+    any(target_os = "linux", target_os = "macos"),
+    tauri_runtime_cef::cef_entry_point
+)]
 fn main() {
     pulpo_lib::run()
 }

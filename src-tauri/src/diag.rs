@@ -8,6 +8,7 @@
 //! - `PULPO_UA=<user agent>`: sustituye el User-Agent de los servicios.
 //! - `PULPO_LOG_BLOCKED=1`: escribe por stderr cada petición bloqueada (Linux).
 //! - `PULPO_DEBUG_PORT=<puerto>`: abre el DevTools remoto de Chromium (Linux).
+//! - `PULPO_LOG_DRAGS=1`: registra los archivos y coordenadas de drops externos (CEF).
 //! - `PULPO_UPDATE_CHECK=1`: busca actualizaciones también en desarrollo.
 //! - `PULPO_DATA_HOME=<carpeta>`: instancia de pruebas con sus propios datos,
 //!   caché y tokens de CI (`./dev.sh --test`, Linux).
@@ -28,7 +29,7 @@ pub fn user_agent() -> Option<String> {
     std::env::var("PULPO_UA").ok().filter(|ua| !ua.is_empty())
 }
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub fn debug_port() -> Option<u16> {
     std::env::var("PULPO_DEBUG_PORT").ok()?.parse().ok()
 }

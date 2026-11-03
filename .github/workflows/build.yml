@@ -59,7 +59,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libgtk-4-dev librsvg2-dev cmake ninja-build
+          sudo apt-get install -y libgtk-4-dev librsvg2-dev cmake ninja-build xvfb python3-gi gir1.2-gtk-4.0 libxtst6
       # tauri::generate_context! necesita el frontend compilado en dist/.
       - name: Placeholder frontend
         shell: bash
@@ -71,6 +71,26 @@ jobs:
         run: cargo clippy --manifest-path src-tauri/Cargo.toml --workspace --all-targets -- -D warnings
       - name: Tests
         run: cargo test --manifest-path src-tauri/Cargo.toml --workspace
+      - uses: pnpm/action-setup@v4
+        if: runner.os == 'Linux'
+      - uses: actions/setup-node@v4
+        if: runner.os == 'Linux'
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Build Linux test application
+        if: runner.os == 'Linux'
+        env:
+          TAURI_CONFIG: '{"build":{"devUrl":null}}'
+        run: |
+          pnpm install --frozen-lockfile
+          pnpm build
+          cargo build --locked --manifest-path src-tauri/Cargo.toml
+      - name: Native external file drop regression
+        if: runner.os == 'Linux'
+        env:
+          GDK_BACKEND: x11
+        run: xvfb-run -a node scripts/smoke-cef.mjs src-tauri/target/debug/pulpo --native-linux
 
   # Cada push a main publica una release. La versión es MAJOR.MINOR de
   # tauri.conf.json + el número de ejecución: 0.1.57, 0.1.58, ...

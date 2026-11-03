@@ -5,10 +5,10 @@
 //! - Windows (WebView2): se intercepta `WebResourceRequested` y se consulta el
 //!   motor de Brave en cada petición.
 
-#[cfg(target_os = "linux")]
-mod linux;
-#[cfg(target_os = "linux")]
-pub use linux::*;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod cef;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+pub use cef::*;
 #[cfg(target_os = "linux")]
 mod linux_compose;
 #[cfg(target_os = "linux")]

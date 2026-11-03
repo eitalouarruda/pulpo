@@ -20,6 +20,16 @@ pub fn attach(
     let Some(platform) = platform.downcast_ref::<tauri_runtime_wry::Webview>() else {
         return;
     };
+    // Los archivos del explorador deben llegar al DOM (WhatsApp, correo…),
+    // no al manejador de drops de Tauri. El builder también lo desactiva.
+    if let Err(e) = unsafe {
+        platform
+            .controller()
+            .cast::<ICoreWebView2Controller4>()
+            .and_then(|controller| controller.SetAllowExternalDrop(true))
+    } {
+        eprintln!("[pulpo] no se pudo habilitar el arrastre externo en WebView2: {e}");
+    }
     if !theme.is_auto() {
         set_theme_inner(platform, theme);
     }

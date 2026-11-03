@@ -37,10 +37,11 @@ keyring = "4"
 # Aviso al terminar un run de CI.
 notify-rust = "4"
 
-# Linux: Chromium (CEF). WebKitGTK es ~3 veces más lento navegando YouTube Music.
-[target.'cfg(target_os = "linux")'.dependencies]
+# Linux y macOS: Chromium (CEF), con el mismo bloqueo y perfiles.
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 blocker = { path = "crates/blocker" }
 tauri-runtime-cef = { version = "=3.0.0-alpha.5", features = ["unstable"] }
+[target.'cfg(target_os = "linux")'.dependencies]
 # Seguir el puntero durante un arrastre (ver `platform/linux_drag.rs`).
 x11-dl = "2.21"
 # Tabla de compose de libxkbcommon (ver `platform/linux_compose.rs`).

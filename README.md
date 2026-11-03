@@ -188,6 +188,28 @@ Every push to `main` builds and publishes a GitHub release with the AppImage
 (built on Arch and smoke-tested on Ubuntu before publishing) and the Windows
 installers.
 
+### Experimental macOS builds
+
+The separate **macOS compatibility** workflow runs on pushes, relevant pull
+requests, or manually from Actions. It builds Intel and Apple Silicon `.app`
+bundles using CEF/Chromium and the same Brave blocker as Linux. Download the
+`pulpo-experimental-*` artifacts from a successful run. These builds use an
+ad-hoc signature for testing; they are not notarized distribution releases.
+The minimum configured macOS version is 13; CI currently runs macOS 15.
+
+The workflow checks Rust, the blocker, the bundle signature and CEF helpers,
+then starts the real app and verifies navigation, isolated cookies/storage,
+and multiple file drops through Chromium with intact contents. The Linux CI
+also performs a real external file drag from a GTK window under Xvfb. File
+drops go to the visible service under the pointer; the sidebar does not
+automatically switch apps during a drag. On Windows, WebView2 receives files
+natively; macOS uses CEF's native drop handling with a parent-window fallback.
+The CDP macOS smoke test does not automate dragging from Finder.
+
+macOS auto-update and a CEF build with H.264/AAC codecs are still pending.
+Real account logins, calls, OS notification permissions and proprietary/DRM
+media still need platform validation; the local fixture does not prove those.
+
 ## Licenses
 
 `src-tauri/crates/blocker/resources/ubo-resources.json` contains uBlock

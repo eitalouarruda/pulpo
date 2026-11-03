@@ -4,6 +4,8 @@ mod ci;
 mod diag;
 mod display;
 mod dnd;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+mod file_drop;
 mod icons;
 mod links;
 mod music;
@@ -670,11 +672,16 @@ pub fn run() {
         std::env::set_var("XDG_CACHE_HOME", home.join("cache"));
     }
     let builder = tauri::Builder::default();
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     let builder = builder.runtime({
         let mut cef = tauri_runtime_cef::Cef::default()
             .profile_preference("browser.enable_spellchecking", true)
             .profile_preference_value("spellcheck.dictionaries", spellcheck::dictionaries());
+        // Los perfiles de prueba son aparte: evita diálogos del llavero en
+        // los smoke tests de la .app firmada ad-hoc, sin tocar perfiles reales.
+        if diag::test_home().is_some() {
+            cef = cef.secret_storage(tauri_runtime_cef::SecretStorage::Mock);
+        }
         // Chromium guarda las sesiones bajo esta raíz. Por defecto es la caché
         // del usuario; se mueve a los datos de la app para que limpiar la
         // caché no cierre la sesión de WhatsApp.
@@ -721,7 +728,7 @@ pub fn run() {
                 .build(),
         )
         .setup(|app| {
-            let data_dir = app.path().app_data_dir()?;
+            let data_dir = app_data_dir(app.handle())?;
             let config_path = services::config_path(&data_dir);
             let settings_path = display::settings_path(&data_dir);
             let settings = display::load(&settings_path);
@@ -775,6 +782,8 @@ pub fn run() {
                 .inner_size()?
                 .to_logical::<f64>(window.scale_factor()?)
                 .height;
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
+            file_drop::install(&window);
             let shell = WebviewBuilder::new("shell", WebviewUrl::App("index.html".into()))
                 .position(LogicalPosition::new(0.0, 0.0))
                 .size(LogicalSize::new(SIDEBAR_WIDTH, height))
@@ -790,7 +799,7 @@ pub fn run() {
                 None => shell,
             };
             // En desarrollo, la consola de la barra lateral sale por la terminal.
-            #[cfg(all(debug_assertions, target_os = "linux"))]
+            #[cfg(all(debug_assertions, any(target_os = "linux", target_os = "macos")))]
             let shell = {
                 use tauri_runtime_cef::WebviewBuilderCefExt;
                 shell.on_console_message(|m| {
@@ -939,8 +948,16 @@ pub(crate) fn data_dir() -> Option<PathBuf> {
         .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".local/share")))
 }
 
+#[cfg(target_os = "macos")]
+pub(crate) fn data_dir() -> Option<PathBuf> {
+    if let Some(home) = diag::test_home() {
+        return Some(home.join("data"));
+    }
+    std::env::var_os("HOME").map(|home| PathBuf::from(home).join("Library/Application Support"))
+}
+
 /// Raíz de Chromium: perfiles, caché de GPU… (ver `run`).
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub(crate) fn cef_root() -> Option<PathBuf> {
     data_dir().map(|dir| dir.join("com.pulpo.app").join("cef"))
 }
@@ -1022,12 +1039,20 @@ const OUTER_SIZE_SCRIPT: &str = r#"(() => {
   }
 })();"#;
 
+/// Datos de Pulpo, aislados cuando se usa una instancia de pruebas.
+fn app_data_dir(app: &AppHandle) -> tauri::Result<PathBuf> {
+    match diag::test_home() {
+        Some(home) => Ok(home.join("data/com.pulpo.app")),
+        None => app.path().app_data_dir(),
+    }
+}
+
 /// Carpeta del perfil (cookies, sesión, caché) de un servicio.
 fn profile_dir(app: &AppHandle, id: &str) -> Option<PathBuf> {
-    let data = app.path().app_data_dir().ok()?;
-    #[cfg(target_os = "linux")]
+    let data = app_data_dir(app).ok()?;
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     return Some(data.join("cef").join(format!("Profile-{id}")));
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
     return Some(data.join("profiles").join(id));
 }
 
@@ -1172,20 +1197,16 @@ fn open_service(
     // Cada servicio con su perfil: cookies y sesiones separadas. En Linux la
     // ruta es relativa a la raíz de Chromium (ver `run`), y tiene que ser una
     // subcarpeta directa: Chromium no crea perfiles más adentro.
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     let profile = PathBuf::from(format!("Profile-{}", service.id));
-    #[cfg(not(target_os = "linux"))]
-    let profile = app
-        .path()
-        .app_data_dir()?
-        .join("profiles")
-        .join(&service.id);
+    #[cfg(not(any(target_os = "linux", target_os = "macos")))]
+    let profile = app_data_dir(app)?.join("profiles").join(&service.id);
 
     // Se crea en blanco y se navega después de enganchar el bloqueo de red, para
     // que no se escape ninguna petición de la primera carga.
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     let (initial_load_tx, initial_load) = std::sync::mpsc::channel();
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     let initial_load_tx = Mutex::new(Some(initial_load_tx));
     let id = service.id.clone();
     let music_tx = app.state::<music::Player>().sender.clone();
@@ -1261,7 +1282,7 @@ fn open_service(
                 // Chromium guarda el zoom por dominio: al cambiar de página vuelve al
                 // que tuviera ese dominio, así que se repone.
                 let _ = webview.set_zoom(current_zoom(webview.app_handle()));
-                #[cfg(target_os = "linux")]
+                #[cfg(any(target_os = "linux", target_os = "macos"))]
                 // La carga en blanco que pidió la app (no el documento interno previo
                 // del runtime): a partir de aquí se puede navegar.
                 if payload.event() == PageLoadEvent::Finished
@@ -1271,7 +1292,7 @@ fn open_service(
                         let _ = tx.send(());
                     }
                 }
-                #[cfg(not(target_os = "linux"))]
+                #[cfg(not(any(target_os = "linux", target_os = "macos")))]
                 let _ = payload;
             })
             .on_new_window({
@@ -1309,7 +1330,7 @@ fn open_service(
     if let Some(script) = platform::compose_script() {
         builder = builder.initialization_script_for_all_frames(script);
     }
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     {
         builder = builder.initialization_script_for_all_frames(links::SCRIPT);
     }
@@ -1330,7 +1351,7 @@ fn open_service(
     }
     if diag::flag("PULPO_BENCH") && service.id == "ytmusic" {
         builder = builder.initialization_script(diag::BENCH_SCRIPT);
-        #[cfg(target_os = "linux")]
+        #[cfg(any(target_os = "linux", target_os = "macos"))]
         {
             use tauri_runtime_cef::WebviewBuilderCefExt;
             builder = builder.on_console_message(|m| println!("[console] {}", m.message));
@@ -1346,7 +1367,7 @@ fn open_service(
         webview.hide()?;
     }
 
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", target_os = "macos"))]
     platform::attach(&webview, initial_load, blocker, &service.url, service.theme)?;
     #[cfg(windows)]
     {
