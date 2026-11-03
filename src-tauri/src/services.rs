@@ -193,6 +193,8 @@ pub const CATALOG: &[Preset] = &[
         "#ff0033",
         true,
     ),
+    // Sin bloqueador: cortar sus anuncios puede dejar sin reproducir la versión gratuita.
+    preset("Spotify", "https://open.spotify.com/", "#1db954", false),
     preset("YouTube", "https://www.youtube.com/", "#ff0000", true),
     preset("X", "https://x.com/", "#14171a", true),
     preset("LinkedIn", "https://www.linkedin.com/", "#0a66c2", true),

@@ -14,6 +14,14 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-11-03",
+    items: {
+      en: ["The home mini player now also works with Spotify (open.spotify.com), besides YouTube Music. Spotify is also in the app catalog."],
+      es: ["El mini reproductor del inicio ahora también funciona con Spotify (open.spotify.com), además de YouTube Music. Spotify también está en el catálogo de apps."],
+      pt: ["O mini player da tela inicial agora também funciona com o Spotify (open.spotify.com), além do YouTube Music. O Spotify também está no catálogo de apps."],
+    },
+  },
+  {
     id: "2026-10-29",
     items: {
       en: [

@@ -26,7 +26,7 @@ const MAX_HOME_PANE: f64 = 0.92;
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct Settings {
-    /// Mini reproductor de YouTube Music en la página inicial.
+    /// Mini reproductor de YouTube Music / Spotify en la página inicial.
     #[serde(default)]
     pub music_player: bool,
     /// Zoom elegido por el usuario, por nombre de pantalla (`eDP-1`, …).

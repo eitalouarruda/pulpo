@@ -44,9 +44,13 @@ pub struct Snapshot {
     track: Option<Track>,
 }
 
+/// Sitios con mini reproductor (`music.js` tiene sus selectores).
+const HOSTS: [&str; 2] = ["music.youtube.com", "open.spotify.com"];
+
 pub fn is_music(url: &str) -> bool {
-    url.parse::<tauri::Url>()
-        .is_ok_and(|u| u.scheme() == "https" && u.host_str() == Some("music.youtube.com"))
+    url.parse::<tauri::Url>().is_ok_and(|u| {
+        u.scheme() == "https" && u.host_str().is_some_and(|host| HOSTS.contains(&host))
+    })
 }
 
 impl Player {
@@ -261,7 +265,8 @@ pub async fn music_control(
         };
         let max = if matches!(action, "seek") { 1e9 } else { 1.0 };
         let volume = volume.filter(|v| v.is_finite()).unwrap_or(0.0).clamp(0.0, max);
-        view.eval(format!("if (location.origin === 'https://music.youtube.com') window.__pulpoMusic?.control('{action}', {volume});"))
+        let origins = serde_json::to_string(&HOSTS.map(|host| format!("https://{host}"))).unwrap();
+        view.eval(format!("if ({origins}.includes(location.origin)) window.__pulpoMusic?.control('{action}', {volume});"))
             .map_err(|e| e.to_string())
     }).await.map_err(|e| e.to_string())?
 }
@@ -273,7 +278,10 @@ mod tests {
     #[test]
     fn rejects_other_origins_and_malformed_tracks() {
         assert!(is_music("https://music.youtube.com/watch?v=x"));
+        assert!(is_music("https://open.spotify.com/"));
         for url in [
+            "https://spotify.com/",
+            "https://open.spotify.com.evil.org/",
             "http://music.youtube.com/",
             "https://music.youtube.com.evil.org/",
             "https://youtube.com/",
