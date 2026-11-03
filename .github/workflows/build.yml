@@ -86,6 +86,16 @@ jobs:
           pnpm install --frozen-lockfile
           pnpm build
           cargo build --locked --manifest-path src-tauri/Cargo.toml
+      - name: Configure Chromium sandbox for Linux smoke test
+        if: runner.os == 'Linux'
+        run: |
+          # Ubuntu restringe los user namespaces: CEF necesita el helper SUID.
+          # Solo se configura el binario generado en este runner efímero.
+          sandbox=src-tauri/target/debug/chrome-sandbox
+          test -f "$sandbox"
+          sudo chown root:root "$sandbox"
+          sudo chmod 4755 "$sandbox"
+          test "$(stat -c '%u:%g:%a' "$sandbox")" = '0:0:4755'
       - name: Native external file drop regression
         if: runner.os == 'Linux'
         env:
