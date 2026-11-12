@@ -41,6 +41,9 @@ pub enum Shortcut {
     Fill,
     /// Clic en una notificación que mostró la página.
     Notification,
+    /// Borde izquierdo dentro de la app: abrir/cerrar la barra lateral.
+    SidebarShow,
+    SidebarHide,
 }
 
 pub(crate) fn marker() -> &'static str {
@@ -62,6 +65,8 @@ pub fn parse(title: &str) -> Option<Shortcut> {
         "switcher" => Some(Shortcut::Switcher),
         "fill" => Some(Shortcut::Fill),
         "notification" => Some(Shortcut::Notification),
+        "s1" => Some(Shortcut::SidebarShow),
+        "s0" => Some(Shortcut::SidebarHide),
         n => n
             .parse()
             .ok()
@@ -152,6 +157,85 @@ pub fn script() -> String {
   }}, true);
   // Al perder el foco (p. ej. Alt+Tab) no cuenta como toque.
   window.addEventListener("blur", () => {{ ctrlAlone = false; }});
+  // Economia em segundo plano: pausa animações CSS e vídeos mutados/loop quando oculto.
+  const isMusicSite = /music\.youtube\.com|open\.spotify\.com/.test(location.origin);
+  if (!isMusicSite) {{
+    let bgStyle = null;
+    const applyBgEconomy = () => {{
+      if (document.hidden) {{
+        if (!bgStyle) {{
+          bgStyle = document.createElement("style");
+          bgStyle.id = "_pulpo_bg_eco";
+          bgStyle.textContent = "* {{ animation-play-state: paused !important; transition-duration: 0.001s !important; }}";
+          (document.head || document.documentElement).appendChild(bgStyle);
+        }}
+        for (const v of document.querySelectorAll("video")) {{
+          if (v.muted || v.loop) {{
+            try {{ v.pause(); v.__pulpoPaused = true; }} catch {{}}
+          }}
+        }}
+      }} else {{
+        if (bgStyle) {{
+          bgStyle.remove();
+          bgStyle = null;
+        }}
+        for (const v of document.querySelectorAll("video")) {{
+          if (v.__pulpoPaused) {{
+            delete v.__pulpoPaused;
+            try {{ v.play(); }} catch {{}}
+          }}
+        }}
+      }}
+    }};
+    document.addEventListener("visibilitychange", applyBgEconomy, true);
+  }}
+  // Borde izquierdo dentro de la app: revela u oculta la barra lateral.
+  let sbTimer = null;
+  let sbSent = false;
+  window.addEventListener("mousemove", (e) => {{
+    if (e.clientX <= 3) {{
+      if (!sbSent && !sbTimer) {{
+        sbTimer = setTimeout(() => {{
+          sbTimer = null;
+          sbSent = true;
+          signal("s1");
+        }}, 90);
+      }}
+    }} else {{
+      if (sbTimer) {{
+        clearTimeout(sbTimer);
+        sbTimer = null;
+      }}
+      if (e.clientX > 6 && sbSent) {{
+        sbSent = false;
+        signal("s0");
+      }}
+    }}
+  }}, {{ passive: true }});
+  // Interceptação de document.cookie para estender cookies de sessão para 30 dias (Max-Age=2592000).
+  try {{
+    const proto = Document.prototype;
+    const cookieDesc = Object.getOwnPropertyDescriptor(proto, "cookie") ||
+                       Object.getOwnPropertyDescriptor(HTMLDocument.prototype, "cookie");
+    if (cookieDesc && cookieDesc.set) {{
+      const origSet = cookieDesc.set;
+      const origGet = cookieDesc.get;
+      Object.defineProperty(document, "cookie", {{
+        configurable: true,
+        enumerable: true,
+        get() {{
+          return origGet.call(this);
+        }},
+        set(val) {{
+          let str = String(val);
+          if (!/(?:expires|max-age)\s*=/i.test(str)) {{
+            str += "; Max-Age=2592000; SameSite=Lax";
+          }}
+          return origSet.call(this, str);
+        }}
+      }});
+    }}
+  }} catch (_) {{}}
   // Notificaciones: Chromium entrega el clic a la página (al objeto
   // `Notification`), no a Pulpo. Se escucha en cada una que cree la página,
   // además de lo que haga ella (ir al chat, etc.).
@@ -161,6 +245,9 @@ pub fn script() -> String {
       constructor(title, options) {{
         super(title, options);
         this.addEventListener("click", () => signal("notification"));
+        if (!lastBadge) {{
+          badge(1);
+        }}
       }}
     }};
   }}
@@ -241,6 +328,8 @@ mod tests {
             parse(&format!("{m}notification")),
             Some(Shortcut::Notification)
         );
+        assert_eq!(parse(&format!("{m}s1")), Some(Shortcut::SidebarShow));
+        assert_eq!(parse(&format!("{m}s0")), Some(Shortcut::SidebarHide));
         assert_eq!(parse(&format!("{m}3")), Some(Shortcut::Index { n: 3 }));
         assert_eq!(parse(&format!("{m}0")), None);
         assert_eq!(parse(&format!("{m}10")), None);

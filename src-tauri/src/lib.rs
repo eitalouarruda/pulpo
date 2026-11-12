@@ -55,6 +55,10 @@ struct AppState {
     blocker: OnceLock<Option<Arc<Blocker>>>,
     /// La barra lateral ocupa toda la ventana (diálogo de agregar/editar).
     overlay: AtomicBool,
+    /// Barra lateral revelada encima/al lado de la app activa (`s1`/`s0`).
+    sidebar_open: AtomicBool,
+    /// Modo de ahorro de energía/standby: cierra los procesos de apps inactivas.
+    standby_master: AtomicBool,
     /// Abrir servicios espera al motor web: uno a la vez.
     opening: Mutex<()>,
     settings_path: PathBuf,
@@ -232,15 +236,32 @@ fn active_service(state: tauri::State<'_, AppState>) -> Option<String> {
 
 #[tauri::command]
 fn activate_service(app: AppHandle, id: String) {
-    *app.state::<AppState>().active.lock().unwrap() = Some(id.clone());
+    let state = app.state::<AppState>();
+    *state.active.lock().unwrap() = Some(id.clone());
+    state.sidebar_open.store(false, Ordering::SeqCst);
     request_layout(&app, Some(id));
 }
 
 /// Página inicial: ninguna app visible.
 #[tauri::command]
 fn show_home(app: AppHandle) {
-    *app.state::<AppState>().active.lock().unwrap() = None;
+    let state = app.state::<AppState>();
+    *state.active.lock().unwrap() = None;
+    state.sidebar_open.store(false, Ordering::SeqCst);
     layout(&app);
+}
+
+#[tauri::command]
+fn set_sidebar_open(app: AppHandle, open: bool) {
+    let state = app.state::<AppState>();
+    if state.sidebar_open.swap(open, Ordering::SeqCst) != open {
+        layout(&app);
+    }
+}
+
+#[tauri::command]
+fn set_standby_master(app: AppHandle, enabled: bool) {
+    app.state::<AppState>().standby_master.store(enabled, Ordering::SeqCst);
 }
 
 #[tauri::command]
@@ -750,6 +771,8 @@ pub fn run() {
                 status: Mutex::default(),
                 blocker: OnceLock::new(),
                 overlay: AtomicBool::new(false),
+                sidebar_open: AtomicBool::new(false),
+                standby_master: AtomicBool::new(false),
                 opening: Mutex::new(()),
                 settings_path,
                 settings: Mutex::new(settings),
@@ -873,6 +896,8 @@ pub fn run() {
             active_service,
             activate_service,
             show_home,
+            set_sidebar_open,
+            set_standby_master,
             get_zoom,
             change_zoom,
             reload_service,
@@ -1039,6 +1064,58 @@ const OUTER_SIZE_SCRIPT: &str = r#"(() => {
   }
 })();"#;
 
+/// Polyfill de PushManager para aplicaciones web que lo requieren
+const PUSH_POLYFILL_SCRIPT: &str = r#"(() => {
+  if (typeof window === "undefined" || window.__pulpoPushPolyfill) return;
+  window.__pulpoPushPolyfill = true;
+  try {
+    const PUSH_KEY = "_ppsub";
+    function createMockSub() {
+      const p256dh = new Uint8Array([4, 15, 23, 45, 67, 89, 12, 34, 56, 78, 90, 12, 34, 56, 78, 90, 12, 34, 56, 78, 90, 12, 34, 56, 78, 90, 12, 34, 56, 78, 90, 12, 34, 56, 78, 90, 12, 34, 56, 78, 90, 12, 34, 56, 78, 90, 12, 34, 56, 78, 90, 12, 34, 56, 78, 90]);
+      const auth = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
+      return {
+        endpoint: "https://fcm.googleapis.com/fcm/send/pulpo-" + btoa(location.origin).replace(/=/g, ""),
+        expirationTime: null,
+        options: { userVisibleOnly: true, applicationServerKey: null },
+        getKey: function(name) {
+          if (name === "p256dh") return p256dh.buffer;
+          if (name === "auth") return auth.buffer;
+          return null;
+        },
+        toJSON: function() {
+          return {
+            endpoint: this.endpoint,
+            expirationTime: null,
+            keys: {
+              p256dh: "BA8XLTWHWEl4kBI0VniQEjRWeJASNFZ4kBI0VniQEjRWeJASNFZ4kBI0VniQEjRWeJASNFZ4kBI0VniQEjRWeJA=",
+              auth: "AQIDBAUGBwgJCgsMDQ4PEA=="
+            }
+          };
+        },
+        unsubscribe: function() {
+          try { localStorage.removeItem(PUSH_KEY); } catch (_) {}
+          return Promise.resolve(true);
+        }
+      };
+    }
+
+    if (typeof PushManager !== "undefined") {
+      PushManager.prototype.getSubscription = function() {
+        try {
+          if (localStorage.getItem(PUSH_KEY)) return Promise.resolve(createMockSub());
+        } catch (_) {}
+        return Promise.resolve(null);
+      };
+      PushManager.prototype.subscribe = function() {
+        try {
+          localStorage.setItem(PUSH_KEY, "1");
+        } catch (_) {}
+        return Promise.resolve(createMockSub());
+      };
+    }
+  } catch (_) {}
+})();"#;
+
 /// Datos de Pulpo, aislados cuando se usa una instancia de pruebas.
 fn app_data_dir(app: &AppHandle) -> tauri::Result<PathBuf> {
     match diag::test_home() {
@@ -1125,10 +1202,124 @@ fn close_webview(app: &AppHandle, id: &str) {
     let Some(webview) = app.get_webview(id) else {
         return;
     };
+
+    #[cfg(windows)]
+    let standby_active = app.state::<AppState>().standby_master.load(Ordering::SeqCst);
+
+    #[cfg(windows)]
+    let browser_pid = if standby_active {
+        let _ = webview.eval(r#"(() => {
+            try {
+                window.__pulpoVolume && window.__pulpoVolume(0);
+                for (const m of document.querySelectorAll('audio, video')) m.pause();
+                window.location.replace('about:blank');
+            } catch (_) {}
+        })();"#);
+
+        get_webview_browser_pid(&webview)
+    } else {
+        0
+    };
+
     let _ = webview.close();
     let deadline = Instant::now() + Duration::from_secs(3);
     while app.get_webview(id).is_some() && Instant::now() < deadline {
         std::thread::sleep(Duration::from_millis(20));
+    }
+
+    #[cfg(windows)]
+    if standby_active && browser_pid > 0 {
+        terminate_app_processes(browser_pid);
+    }
+}
+
+#[cfg(windows)]
+fn get_webview_browser_pid(webview: &tauri::Webview) -> u32 {
+    let pid_arc = std::sync::Arc::new(std::sync::Mutex::new(0u32));
+    let pid_clone = pid_arc.clone();
+    let _ = webview.with_webview(move |platform| {
+        if let Some(wry_webview) = platform.downcast_ref::<tauri_runtime_wry::Webview>() {
+            unsafe {
+                if let Ok(core) = wry_webview.controller().CoreWebView2() {
+                    let mut pid = 0u32;
+                    if core.BrowserProcessId(&mut pid).is_ok() {
+                        *pid_clone.lock().unwrap() = pid;
+                    }
+                }
+            }
+        }
+    });
+    let result = *pid_arc.lock().unwrap();
+    result
+}
+
+#[cfg(windows)]
+fn terminate_app_processes(browser_pid: u32) {
+    use std::time::{Duration, Instant};
+    use windows::Win32::Foundation::{CloseHandle, HANDLE};
+    use windows::Win32::System::Diagnostics::ToolHelp::{
+        CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
+        TH32CS_SNAPPROCESS,
+    };
+    use windows::Win32::System::Threading::{
+        GetExitCodeProcess, OpenProcess, TerminateProcess, PROCESS_QUERY_LIMITED_INFORMATION,
+        PROCESS_TERMINATE,
+    };
+
+    const STILL_ACTIVE: u32 = 259;
+
+    let mut tree = vec![browser_pid];
+    let mut idx = 0;
+    while idx < tree.len() {
+        let parent = tree[idx];
+        idx += 1;
+        unsafe {
+            if let Ok(snapshot) = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) {
+                let mut entry = PROCESSENTRY32W {
+                    dwSize: std::mem::size_of::<PROCESSENTRY32W>() as u32,
+                    ..Default::default()
+                };
+                let mut more = Process32FirstW(snapshot, &mut entry).is_ok();
+                while more {
+                    if entry.th32ParentProcessID == parent {
+                        if !tree.contains(&entry.th32ProcessID) {
+                            tree.push(entry.th32ProcessID);
+                        }
+                    }
+                    more = Process32NextW(snapshot, &mut entry).is_ok();
+                }
+                let _ = CloseHandle(snapshot);
+            }
+        }
+    }
+
+    let handles: Vec<HANDLE> = tree
+        .iter()
+        .filter_map(|&pid| unsafe {
+            OpenProcess(
+                PROCESS_QUERY_LIMITED_INFORMATION | PROCESS_TERMINATE,
+                false,
+                pid,
+            )
+            .ok()
+        })
+        .collect();
+
+    let alive = |handle: HANDLE| {
+        let mut code = 0u32;
+        unsafe { GetExitCodeProcess(handle, &mut code) }.is_ok() && code == STILL_ACTIVE
+    };
+
+    let deadline = Instant::now() + Duration::from_millis(1000);
+    while Instant::now() < deadline && handles.iter().any(|&h| alive(h)) {
+        std::thread::sleep(Duration::from_millis(50));
+    }
+
+    for handle in handles {
+        if alive(handle) {
+            let _ = unsafe { TerminateProcess(handle, 0) };
+        }
+        let _ = unsafe { CloseHandle(handle) };
     }
 }
 
@@ -1228,6 +1419,7 @@ fn open_service(
             .background_color(tauri::window::Color(255, 255, 255, 255))
             .initialization_script(CANVAS_SCRIPT)
             .initialization_script(OUTER_SIZE_SCRIPT)
+            .initialization_script(PUSH_POLYFILL_SCRIPT)
             // Notificaciones permitidas: la app la añadió el usuario (como en
             // Rambox) y "No molestar" las silencia. WebView2 no tiene dónde
             // aceptarlas y las dejaba bloqueadas; CEF ya las permitía.
@@ -1358,9 +1550,14 @@ fn open_service(
         }
     }
 
+    let initial_x = if app.state::<AppState>().sidebar_open.load(Ordering::SeqCst) {
+        SIDEBAR_WIDTH
+    } else {
+        0.0
+    };
     let webview = window.add_child(
         builder
-            .position(LogicalPosition::new(SIDEBAR_WIDTH, 0.0))
+            .position(LogicalPosition::new(initial_x, 0.0))
             .size(LogicalSize::new(1.0, 1.0)),
     )?;
     if placement(app, &service.id) == Placement::Hidden {
@@ -1433,6 +1630,20 @@ fn on_shortcut(app: &AppHandle, shortcut: shortcuts::Shortcut, id: &str) {
         shortcuts::Shortcut::Notification => {
             raise_window(app);
             let _ = app.emit_to("shell", "notification-clicked", id);
+            return;
+        }
+        shortcuts::Shortcut::SidebarShow => {
+            let state = app.state::<AppState>();
+            if !state.sidebar_open.swap(true, Ordering::SeqCst) {
+                layout(app);
+            }
+            return;
+        }
+        shortcuts::Shortcut::SidebarHide => {
+            let state = app.state::<AppState>();
+            if state.sidebar_open.swap(false, Ordering::SeqCst) {
+                layout(app);
+            }
             return;
         }
         shortcuts::Shortcut::Previous | shortcuts::Shortcut::Index { .. } => {}
@@ -1528,13 +1739,17 @@ fn apply_layout(app: &AppHandle) {
     let size = size.to_logical::<f64>(scale);
     let state = app.state::<AppState>();
     let overlay = state.overlay.load(Ordering::SeqCst);
+    let sidebar_open = state.sidebar_open.load(Ordering::SeqCst);
     // La barra lateral crece con el zoom, como su contenido.
     let sidebar = (SIDEBAR_WIDTH * *state.zoom.lock().unwrap()).round();
     if let Some(shell) = app.get_webview("shell") {
         let width = if overlay { size.width } else { sidebar };
         let _ = shell.set_size(LogicalSize::new(width, size.height));
     }
-    let content = LogicalSize::new((size.width - sidebar).max(1.0), size.height);
+    // Las apps conservan siempre el ancho completo de la ventana: al revelar la
+    // barra lateral solo deslizan en `x` (cero eventos `resize`, sin piscada).
+    let content = LogicalSize::new(size.width.max(1.0), size.height);
+    let app_x = if sidebar_open { sidebar } else { 0.0 };
     let ids: Vec<String> = state
         .services
         .lock()
@@ -1552,11 +1767,11 @@ fn apply_layout(app: &AppHandle) {
         };
         let place = placement(app, &id);
         // Las ocultas conservan el tamaño completo: no se re-maquetan al volver.
-        let (y, height) = match place {
-            Placement::HomePane => (top, (size.height - top).max(1.0)),
-            Placement::Full | Placement::Hidden => (0.0, size.height),
+        let (x, y, height) = match place {
+            Placement::HomePane => (0.0, top, (size.height - top).max(1.0)),
+            Placement::Full | Placement::Hidden => (app_x, 0.0, size.height),
         };
-        let _ = webview.set_position(LogicalPosition::new(sidebar, y));
+        let _ = webview.set_position(LogicalPosition::new(x, y));
         let _ = webview.set_size(LogicalSize::new(content.width, height));
         let _ = if place == Placement::Hidden {
             webview.hide()

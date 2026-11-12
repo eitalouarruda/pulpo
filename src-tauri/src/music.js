@@ -113,6 +113,25 @@
     return state !== "playing";
   };
   const timing = () => {
+    // 1. YouTube Music: ler .time-info ("mm:ss / mm:ss") ou #progress-bar
+    const timeInfo = (bar || document).querySelector(".time-info")?.textContent?.trim();
+    if (timeInfo && timeInfo.includes("/")) {
+      const parts = timeInfo.split("/").map((s) => s.trim());
+      const pos = seconds(parts[0]);
+      const dur = seconds(parts[1]);
+      if (dur > 0) {
+        return { position: pos, duration: dur };
+      }
+    }
+    const pb = (bar || document).querySelector("#progress-bar, [role='slider']");
+    if (pb) {
+      const pos = Number(pb.getAttribute("aria-valuenow"));
+      const dur = Number(pb.getAttribute("aria-valuemax"));
+      if (Number.isFinite(dur) && dur > 0 && Number.isFinite(pos)) {
+        return { position: Math.max(0, pos), duration: dur };
+      }
+    }
+
     if (video && Number.isFinite(video.duration) && video.duration > 0) {
       return { position: Math.max(0, video.currentTime || 0), duration: video.duration };
     }

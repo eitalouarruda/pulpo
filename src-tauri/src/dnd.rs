@@ -81,6 +81,38 @@ pub const SCRIPT: &str = r#"(() => {
       if (!quiet()) return start.apply(this, args);
     };
   }
+
+  // ---------------- Ponte específica para DevPulse ----------------
+  if (/devpulse/i.test(location.href) || /devpulse/i.test(document.title)) {
+    let dpLastCount = -1;
+    setInterval(() => {
+      try {
+        const badgeEl = document.querySelector('[data-testid="notifications-count"], .notifications-badge, .badge-count, #notification-counter');
+        const count = badgeEl ? parseInt(badgeEl.textContent.trim(), 10) || 0 : 0;
+        if (count > dpLastCount) {
+          if (dpLastCount >= 0 && count > 0) {
+            new Notification("DevPulse", {
+              body: `Você tem ${count} novas notificações`,
+              icon: "/favicon.ico"
+            });
+            try {
+              const audio = new Audio("/sounds/notification-success.mp3");
+              audio.play().catch(() => {});
+            } catch (_) {}
+          }
+          dpLastCount = count;
+          if (navigator.setAppBadge) {
+            navigator.setAppBadge(count);
+          }
+        } else if (count < dpLastCount) {
+          dpLastCount = count;
+          if (navigator.setAppBadge) {
+            navigator.setAppBadge(count);
+          }
+        }
+      } catch (_) {}
+    }, 2500);
+  }
 })();"#;
 
 /// Las apps con no molestar activo ahora.

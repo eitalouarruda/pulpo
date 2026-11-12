@@ -14,6 +14,29 @@ export interface WhatsNewEntry {
 
 export const WHATS_NEW: WhatsNewEntry[] = [
   {
+    id: "2026-11-12",
+    items: {
+      en: [
+        "Smart Standby mode: inactive apps automatically suspend and release RAM and background processes, with per-app ignore-close protection.",
+        "Smooth auto-hiding sidebar on home screen and within web apps without screen flicker.",
+        "YouTube Music mini player: fixed total track duration display.",
+        "DevPulse bridge with sound and badge alerts, persistent session cookies and login autofill.",
+      ],
+      es: [
+        "Modo Standby inteligente: las apps inactivas liberan RAM y procesos en segundo plano automáticamente, con opción de ignorar cierre por app.",
+        "Barra lateral con ocultamiento automático suave en la pantalla inicial y dentro de las apps sin parpadeos.",
+        "Mini reproductor de YouTube Music: corregida la visualización de la duración total de la pista.",
+        "Integración con DevPulse con alertas de sonido y badge, persistencia de cookies de sesión y autocompletado de login.",
+      ],
+      pt: [
+        "Modo Standby inteligente: apps inativos liberam memória RAM e processos em segundo plano automaticamente, com proteção configurável por app.",
+        "Barra lateral com recolhimento e revelação suave na tela inicial e dentro dos apps sem nenhum piscar de tela.",
+        "Mini player do YouTube Music: corrigida a exibição da duração total da faixa musical.",
+        "Integração com DevPulse com alertas sonoros e contador, persistência prolongada de cookies de sessão e autopreenchimento de login.",
+      ],
+    },
+  },
+  {
     id: "2026-11-03-macos-release",
     items: {
       en: ["macOS installers for Apple Silicon and Intel are now included in releases alongside Linux and Windows."],

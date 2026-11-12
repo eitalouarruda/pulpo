@@ -84,6 +84,8 @@ const form = {
   name: $<HTMLInputElement>("#f-name"),
   url: $<HTMLInputElement>("#f-url"),
   adblock: $<HTMLInputElement>("#f-adblock"),
+  sbBox: $("#f-sb-box"),
+  sb: $<HTMLInputElement>("#f-sb"),
   group: $<HTMLInputElement>("#f-group"),
   groups: $("#groups"),
   iconPreview: $("#f-icon"),
@@ -101,6 +103,70 @@ const badges = new Map<string, number>();
 /// Apps con no molestar activo ahora (lo decide Rust).
 let dndActive = new Set<string>();
 
+// ---------------------------------------------------------------- Standby System
+const SB_MASTER_KEY = "pulpo_standby_master_v3";
+const SB_CFG_KEY = "pulpo_standby_cfg_v2";
+
+function isStandbyMaster(): boolean {
+  return localStorage.getItem(SB_MASTER_KEY) === "true";
+}
+
+function setStandbyMaster(enabled: boolean) {
+  localStorage.setItem(SB_MASTER_KEY, String(enabled));
+  invoke("set_standby_master", { enabled }).catch(console.error);
+  syncAllStandby();
+  renderSidebar();
+  if (!overlay.hidden && currentView() === "home") renderHome();
+  if (!overlay.hidden && currentView() === "manage") renderManage();
+}
+
+function getStandbyConfig(): Record<string, "on" | "off"> {
+  try {
+    return JSON.parse(localStorage.getItem(SB_CFG_KEY) || "{}");
+  } catch {
+    return {};
+  }
+}
+
+function isAppStandby(id: string): boolean {
+  if (!isStandbyMaster()) return false;
+  const cfg = getStandbyConfig();
+  return cfg[id] === "on";
+}
+
+function setAppStandby(id: string, mode: "on" | "off") {
+  const cfg = getStandbyConfig();
+  if (mode === "off") {
+    delete cfg[id];
+  } else {
+    cfg[id] = "on";
+  }
+  localStorage.setItem(SB_CFG_KEY, JSON.stringify(cfg));
+  if (isStandbyMaster()) {
+    const keep = id === active || id === homeApp || mode === "on";
+    invoke("set_service_enabled", { id, enabled: keep }).catch(console.error);
+  }
+  renderManage();
+  renderSidebar();
+  if (!overlay.hidden && currentView() === "home") renderHome();
+}
+
+function syncAllStandby() {
+  const master = isStandbyMaster();
+  for (const s of services) {
+    if (master) {
+      const keep = s.id === active || s.id === homeApp || isAppStandby(s.id);
+      if (s.enabled !== keep) {
+        invoke("set_service_enabled", { id: s.id, enabled: keep }).catch(console.error);
+      }
+    } else {
+      if (!s.enabled) {
+        invoke("set_service_enabled", { id: s.id, enabled: true }).catch(console.error);
+      }
+    }
+  }
+}
+
 // ---------------------------------------------------------------- barra lateral
 
 function markCurrent() {
@@ -117,6 +183,19 @@ function select(id: string) {
   active = id;
   recent = [id, ...recent.filter((x) => x !== id)];
   markCurrent();
+  const s = services.find((x) => x.id === id);
+  if (s && !s.enabled) {
+    invoke("set_service_enabled", { id, enabled: true }).catch(console.error);
+  }
+  if (isStandbyMaster()) {
+    for (const other of services) {
+      if (other.id !== id && other.id !== homeApp && !isAppStandby(other.id)) {
+        if (other.enabled) {
+          invoke("set_service_enabled", { id: other.id, enabled: false }).catch(console.error);
+        }
+      }
+    }
+  }
   invoke("activate_service", { id }).catch(console.error);
   showBase(true);
 }
@@ -149,6 +228,8 @@ type View = keyof typeof views;
 /// app desactivada o (null) la propia app.
 function baseView(): View | null {
   if (active === null) return "home";
+  // En modo Standby, si el servicio está cerrado se abre automáticamente sin pantalla de bloqueo.
+  if (isStandbyMaster()) return null;
   return services.find((s) => s.id === active)?.enabled === false ? "disabled" : null;
 }
 
@@ -232,6 +313,7 @@ function renderHome() {
       tile.dataset.id = s.id;
       tile.draggable = true;
       tile.classList.toggle("disabled", !s.enabled);
+      tile.classList.toggle("is-active-app", isStandbyMaster() && s.enabled);
       tile.title = s.enabled ? s.name : t("service.disabledTitle", { name: s.name });
       const icon = document.createElement("span");
       icon.className = "service home-icon";
@@ -394,6 +476,7 @@ function serviceButton(s: Service, index: number) {
     .join(" · ");
   button.setAttribute("aria-current", String(s.id === active));
   button.classList.toggle("disabled", !s.enabled);
+  button.classList.toggle("is-active-app", isStandbyMaster() && s.enabled);
   button.style.setProperty("--color", s.color);
   fillIcon(button, s);
 
@@ -536,7 +619,68 @@ function renderSidebar() {
     items.push(serviceButton(s, i));
   }
   nav.replaceChildren(...items);
+  updateSidebarArrows();
 }
+
+const sbEdge = $("#sb-edge");
+const sidebar = $("#sidebar");
+
+function syncSidebarMode() {
+  const inApp = overlay.hidden;
+  document.body.classList.toggle("in-app", inApp);
+  if (inApp) {
+    document.body.classList.remove("sb-open");
+  } else {
+    invoke("set_sidebar_open", { open: false }).catch(console.error);
+  }
+}
+
+sbEdge.addEventListener("mouseenter", () => {
+  if (!document.body.classList.contains("in-app")) {
+    document.body.classList.add("sb-open");
+  }
+});
+sbEdge.addEventListener("mouseleave", (e) => {
+  if (!sidebar.contains(e.relatedTarget as Node | null)) {
+    document.body.classList.remove("sb-open");
+  }
+});
+sidebar.addEventListener("mouseleave", (e) => {
+  if (document.body.classList.contains("in-app")) {
+    invoke("set_sidebar_open", { open: false }).catch(console.error);
+  } else if (e.relatedTarget !== sbEdge) {
+    document.body.classList.remove("sb-open");
+  }
+});
+new MutationObserver(syncSidebarMode).observe(overlay, { attributes: true, attributeFilter: ["hidden"] });
+syncSidebarMode();
+
+const sbUp = $<HTMLButtonElement>("#sb-up");
+const sbDown = $<HTMLButtonElement>("#sb-down");
+
+function updateSidebarArrows() {
+  const overflow = nav.scrollHeight > nav.clientHeight + 2;
+  sbUp.hidden = !overflow;
+  sbDown.hidden = !overflow;
+  if (overflow) {
+    sbUp.disabled = nav.scrollTop <= 1;
+    sbDown.disabled = nav.scrollTop + nav.clientHeight >= nav.scrollHeight - 1;
+  }
+}
+
+sbUp.addEventListener("click", () => nav.scrollBy({ top: -130, behavior: "smooth" }));
+sbDown.addEventListener("click", () => nav.scrollBy({ top: 130, behavior: "smooth" }));
+nav.addEventListener("scroll", updateSidebarArrows, { passive: true });
+nav.addEventListener(
+  "wheel",
+  (e) => {
+    if (nav.scrollHeight <= nav.clientHeight + 2) return;
+    e.preventDefault();
+    nav.scrollBy({ top: e.deltaY, behavior: "smooth" });
+  },
+  { passive: false },
+);
+new ResizeObserver(updateSidebarArrows).observe(nav);
 
 // Reordenar arrastrando: una app, o un grupo entero por su título.
 let dragged: HTMLElement | null = null;
@@ -754,6 +898,8 @@ function setHomeApp(id: string | null) {
 function renderManage() {
   renderHomeAppChoice();
   renderLinks();
+  const sbMaster = $<HTMLInputElement>("#sb-master");
+  sbMaster.checked = isStandbyMaster();
   const list = $("#manage-list");
   list.replaceChildren(
     ...services.map((s) => {
@@ -775,11 +921,20 @@ function renderManage() {
       const name = document.createElement("strong");
       name.textContent = s.name;
       const meta = document.createElement("small");
+      const statusLabel = isStandbyMaster()
+        ? s.id === active
+          ? t("standby.statusActive")
+          : isAppStandby(s.id)
+            ? t("standby.statusStandby")
+            : t("standby.statusInactive")
+        : s.enabled
+          ? ""
+          : t("service.disabled");
       meta.textContent = [
         new URL(s.url).host,
         s.group ? t("manage.group", { group: s.group }) : "",
         t(s.adblock ? "manage.withAdblock" : "manage.withoutAdblock"),
-        s.enabled ? "" : t("service.disabled"),
+        statusLabel,
       ]
         .filter(Boolean)
         .join(" · ");
@@ -801,11 +956,18 @@ function renderManage() {
       down.title = t("manage.down");
       up.disabled = pos === 0;
       down.disabled = pos === sameGroup.length - 1;
-      li.append(
-        up,
-        down,
-        icon,
-        text,
+
+      const actions = [up, down, icon, text];
+      if (isStandbyMaster()) {
+        const isSb = isAppStandby(s.id);
+        const indicator = document.createElement("span");
+        indicator.className = `sb-indicator ${isSb ? "on" : "off"}`;
+        indicator.title = isSb
+          ? t("standby.ignoreCloseSim")
+          : t("standby.ignoreCloseNao");
+        actions.push(indicator);
+      }
+      actions.push(
         button(t("action.edit"), "small", () => {
           returnTo = "manage";
           openForm(s, s.id);
@@ -818,6 +980,7 @@ function renderManage() {
           askRemove(s.id);
         }),
       );
+      li.append(...actions);
       return li;
     }),
   );
@@ -882,6 +1045,13 @@ function openMenu(s: Service, top: number, left?: number) {
       checked: homeApp === s.id,
       disabled: !s.enabled,
     }),
+    ...(isStandbyMaster()
+      ? [
+          item(t("standby.ignoreClose"), () => setAppStandby(s.id, isAppStandby(s.id) ? "off" : "on"), {
+            checked: isAppStandby(s.id),
+          }),
+        ]
+      : []),
     sep(),
     volumeControl(s.id, volumeOf(s)),
     sep(),
@@ -1190,6 +1360,12 @@ function openForm(init: FormInit, edit: string | null) {
   form.name.value = init.name;
   form.url.value = init.url;
   form.adblock.checked = init.adblock;
+  if (isStandbyMaster()) {
+    form.sbBox.hidden = false;
+    form.sb.checked = edit ? isAppStandby(edit) : false;
+  } else {
+    form.sbBox.hidden = true;
+  }
   form.group.value = init.group ?? "";
   form.groups.hidden = true;
   formColor = init.color ?? "#8e4ec6";
@@ -1409,6 +1585,9 @@ views.form.addEventListener("submit", async (e) => {
     if (iconChanged && !(iconChoice.source === "web" && !before)) {
       await invoke("set_service_icon", { id, ...iconChoice });
     }
+    if (isStandbyMaster()) {
+      setAppStandby(id, form.sb.checked ? "on" : "off");
+    }
     closeOverlay();
   } catch (err) {
     form.error.textContent = tError(err);
@@ -1522,10 +1701,10 @@ function openSwitcher() {
 
 function renderSwitcher() {
   const q = fold(switcher.search.value.trim());
-  const enabled = services.filter((s) => s.enabled);
+  const allServices = isStandbyMaster() ? services : services.filter((s) => s.enabled);
   const byRecent = [
-    ...recent.flatMap((id) => enabled.filter((s) => s.id === id)),
-    ...enabled.filter((s) => !recent.includes(s.id)),
+    ...recent.flatMap((id) => allServices.filter((s) => s.id === id)),
+    ...allServices.filter((s) => !recent.includes(s.id)),
   ];
   const matches = byRecent.filter((s) => fold(s.name).includes(q));
   switcherItems = [
@@ -1737,6 +1916,10 @@ services = await invoke<Service[]>("list_services");
 dndActive = new Set(await invoke<string[]>("dnd_active"));
 active = await invoke<string | null>("active_service");
 if (active) recent = [active];
+invoke("set_standby_master", { enabled: isStandbyMaster() }).catch(console.error);
+if (isStandbyMaster()) {
+  setTimeout(syncAllStandby, 1200);
+}
 renderSidebar();
 showBase();
 
@@ -2206,6 +2389,12 @@ overlay.addEventListener("click", (e) => {
   if (!link) return;
   e.preventDefault();
   invoke("ci_open", { url: link.href }).catch(console.error);
+});
+
+const sbMasterBox = $<HTMLInputElement>("#sb-master");
+sbMasterBox.checked = isStandbyMaster();
+sbMasterBox.addEventListener("change", () => {
+  setStandbyMaster(sbMasterBox.checked);
 });
 
 const ciEnabledBox = $<HTMLInputElement>("#ci-enabled");
@@ -2701,11 +2890,15 @@ function showWhatsNew(ids: string[] | null, version?: string) {
       section.className = "whatsnew-entry";
       const h = document.createElement("h3");
       const seen = whatsNewVersions[entry.id];
-      const date = new Date(`${entry.id}T12:00:00`).toLocaleDateString(lang, {
-        day: "numeric",
-        month: "long",
-        year: "numeric",
-      });
+      const dateStr = entry.id.slice(0, 10);
+      const parsedDate = new Date(`${dateStr}T12:00:00`);
+      const date = isNaN(parsedDate.getTime())
+        ? entry.id
+        : parsedDate.toLocaleDateString(lang, {
+            day: "numeric",
+            month: "long",
+            year: "numeric",
+          });
       h.textContent = seen ? `${t("whatsnew.version", { version: seen })} · ${date}` : date;
       const list = document.createElement("ul");
       list.append(
