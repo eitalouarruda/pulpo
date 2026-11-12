@@ -212,30 +212,6 @@ pub fn script() -> String {
       }}
     }}
   }}, {{ passive: true }});
-  // Interceptação de document.cookie para estender cookies de sessão para 30 dias (Max-Age=2592000).
-  try {{
-    const proto = Document.prototype;
-    const cookieDesc = Object.getOwnPropertyDescriptor(proto, "cookie") ||
-                       Object.getOwnPropertyDescriptor(HTMLDocument.prototype, "cookie");
-    if (cookieDesc && cookieDesc.set) {{
-      const origSet = cookieDesc.set;
-      const origGet = cookieDesc.get;
-      Object.defineProperty(document, "cookie", {{
-        configurable: true,
-        enumerable: true,
-        get() {{
-          return origGet.call(this);
-        }},
-        set(val) {{
-          let str = String(val);
-          if (!/(?:expires|max-age)\s*=/i.test(str)) {{
-            str += "; Max-Age=2592000; SameSite=Lax";
-          }}
-          return origSet.call(this, str);
-        }}
-      }});
-    }}
-  }} catch (_) {{}}
   // Notificaciones: Chromium entrega el clic a la página (al objeto
   // `Notification`), no a Pulpo. Se escucha en cada una que cree la página,
   // además de lo que haga ella (ir al chat, etc.).

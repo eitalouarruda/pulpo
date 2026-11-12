@@ -25,7 +25,7 @@ pub fn webview2_args() -> String {
         }
     }
     format!(
-        "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --renderer-process-limit=2 --js-flags=--max-old-space-size=96 --accept-lang={}",
+        "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --accept-lang={}",
         langs.join(",")
     )
 }

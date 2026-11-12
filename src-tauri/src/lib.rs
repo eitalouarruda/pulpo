@@ -1064,58 +1064,6 @@ const OUTER_SIZE_SCRIPT: &str = r#"(() => {
   }
 })();"#;
 
-/// Polyfill de PushManager para aplicaciones web que lo requieren
-const PUSH_POLYFILL_SCRIPT: &str = r#"(() => {
-  if (typeof window === "undefined" || window.__pulpoPushPolyfill) return;
-  window.__pulpoPushPolyfill = true;
-  try {
-    const PUSH_KEY = "_ppsub";
-    function createMockSub() {
-      const p256dh = new Uint8Array([4, 15, 23, 45, 67, 89, 12, 34, 56, 78, 90, 12, 34, 56, 78, 90, 12, 34, 56, 78, 90, 12, 34, 56, 78, 90, 12, 34, 56, 78, 90, 12, 34, 56, 78, 90, 12, 34, 56, 78, 90, 12, 34, 56, 78, 90, 12, 34, 56, 78, 90, 12, 34, 56, 78, 90]);
-      const auth = new Uint8Array([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
-      return {
-        endpoint: "https://fcm.googleapis.com/fcm/send/pulpo-" + btoa(location.origin).replace(/=/g, ""),
-        expirationTime: null,
-        options: { userVisibleOnly: true, applicationServerKey: null },
-        getKey: function(name) {
-          if (name === "p256dh") return p256dh.buffer;
-          if (name === "auth") return auth.buffer;
-          return null;
-        },
-        toJSON: function() {
-          return {
-            endpoint: this.endpoint,
-            expirationTime: null,
-            keys: {
-              p256dh: "BA8XLTWHWEl4kBI0VniQEjRWeJASNFZ4kBI0VniQEjRWeJASNFZ4kBI0VniQEjRWeJASNFZ4kBI0VniQEjRWeJA=",
-              auth: "AQIDBAUGBwgJCgsMDQ4PEA=="
-            }
-          };
-        },
-        unsubscribe: function() {
-          try { localStorage.removeItem(PUSH_KEY); } catch (_) {}
-          return Promise.resolve(true);
-        }
-      };
-    }
-
-    if (typeof PushManager !== "undefined") {
-      PushManager.prototype.getSubscription = function() {
-        try {
-          if (localStorage.getItem(PUSH_KEY)) return Promise.resolve(createMockSub());
-        } catch (_) {}
-        return Promise.resolve(null);
-      };
-      PushManager.prototype.subscribe = function() {
-        try {
-          localStorage.setItem(PUSH_KEY, "1");
-        } catch (_) {}
-        return Promise.resolve(createMockSub());
-      };
-    }
-  } catch (_) {}
-})();"#;
-
 /// Datos de Pulpo, aislados cuando se usa una instancia de pruebas.
 fn app_data_dir(app: &AppHandle) -> tauri::Result<PathBuf> {
     match diag::test_home() {
@@ -1419,7 +1367,6 @@ fn open_service(
             .background_color(tauri::window::Color(255, 255, 255, 255))
             .initialization_script(CANVAS_SCRIPT)
             .initialization_script(OUTER_SIZE_SCRIPT)
-            .initialization_script(PUSH_POLYFILL_SCRIPT)
             // Notificaciones permitidas: la app la añadió el usuario (como en
             // Rambox) y "No molestar" las silencia. WebView2 no tiene dónde
             // aceptarlas y las dejaba bloqueadas; CEF ya las permitía.

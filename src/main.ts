@@ -144,25 +144,73 @@ function setAppStandby(id: string, mode: "on" | "off") {
   localStorage.setItem(SB_CFG_KEY, JSON.stringify(cfg));
   if (isStandbyMaster()) {
     const keep = id === active || id === homeApp || mode === "on";
-    invoke("set_service_enabled", { id, enabled: keep }).catch(console.error);
+    const s = services.find((x) => x.id === id);
+    if (keep) {
+      unmarkStandbySuspended(id);
+      if (s && !s.enabled) invoke("set_service_enabled", { id, enabled: true }).catch(console.error);
+    } else if (s?.enabled) {
+      markStandbySuspended(id);
+      invoke("set_service_enabled", { id, enabled: false }).catch(console.error);
+    }
   }
   renderManage();
   renderSidebar();
   if (!overlay.hidden && currentView() === "home") renderHome();
 }
 
+const SB_SUSPENDED_KEY = "pulpo_standby_suspended_v1";
+
+function loadStandbySuspended(): Set<string> {
+  try {
+    const raw = JSON.parse(localStorage.getItem(SB_SUSPENDED_KEY) || "[]");
+    return new Set(Array.isArray(raw) ? raw.filter((x): x is string => typeof x === "string") : []);
+  } catch {
+    return new Set();
+  }
+}
+
+/// Apps que foram suspensas temporariamente pelo modo Standby (para não reativar apps desativadas manualmente).
+const standbySuspended = loadStandbySuspended();
+
+function saveStandbySuspended() {
+  localStorage.setItem(SB_SUSPENDED_KEY, JSON.stringify([...standbySuspended]));
+}
+
+function markStandbySuspended(id: string) {
+  if (!standbySuspended.has(id)) {
+    standbySuspended.add(id);
+    saveStandbySuspended();
+  }
+}
+
+function unmarkStandbySuspended(id: string) {
+  if (standbySuspended.delete(id)) {
+    saveStandbySuspended();
+  }
+}
+
 function syncAllStandby() {
   const master = isStandbyMaster();
-  for (const s of services) {
-    if (master) {
+  if (master) {
+    for (const s of services) {
       const keep = s.id === active || s.id === homeApp || isAppStandby(s.id);
-      if (s.enabled !== keep) {
-        invoke("set_service_enabled", { id: s.id, enabled: keep }).catch(console.error);
-      }
-    } else {
-      if (!s.enabled) {
+      if (s.enabled && !keep) {
+        markStandbySuspended(s.id);
+        invoke("set_service_enabled", { id: s.id, enabled: false }).catch(console.error);
+      } else if (!s.enabled && keep && standbySuspended.has(s.id)) {
+        unmarkStandbySuspended(s.id);
         invoke("set_service_enabled", { id: s.id, enabled: true }).catch(console.error);
       }
+    }
+  } else {
+    // Ao desligar o Standby, reativa SOMENTE as que o Standby suspendeu temporariamente,
+    // preservando qualquer app que o usuário tenha desativado manualmente no Gerenciador!
+    for (const id of standbySuspended) {
+      invoke("set_service_enabled", { id, enabled: true }).catch(console.error);
+    }
+    if (standbySuspended.size > 0) {
+      standbySuspended.clear();
+      saveStandbySuspended();
     }
   }
 }
@@ -184,13 +232,15 @@ function select(id: string) {
   recent = [id, ...recent.filter((x) => x !== id)];
   markCurrent();
   const s = services.find((x) => x.id === id);
-  if (s && !s.enabled) {
-    invoke("set_service_enabled", { id, enabled: true }).catch(console.error);
-  }
   if (isStandbyMaster()) {
+    if (s && !s.enabled) {
+      unmarkStandbySuspended(id);
+      invoke("set_service_enabled", { id, enabled: true }).catch(console.error);
+    }
     for (const other of services) {
       if (other.id !== id && other.id !== homeApp && !isAppStandby(other.id)) {
         if (other.enabled) {
+          markStandbySuspended(other.id);
           invoke("set_service_enabled", { id: other.id, enabled: false }).catch(console.error);
         }
       }
@@ -973,6 +1023,7 @@ function renderManage() {
           openForm(s, s.id);
         }),
         button(t(s.enabled ? "action.disable" : "action.enable"), "small ghost-btn", () => {
+          unmarkStandbySuspended(s.id);
           invoke("set_service_enabled", { id: s.id, enabled: !s.enabled }).catch(console.error);
         }),
         button(t("action.remove"), "small danger-btn", () => {
@@ -1058,9 +1109,10 @@ function openMenu(s: Service, top: number, left?: number) {
     ...dndItems(s, item),
     sep(),
     item(t("action.editMenu"), () => openForm(s, s.id), { dialog: true }),
-    item(t(s.enabled ? "action.disable" : "action.enable"), () =>
-      invoke("set_service_enabled", { id: s.id, enabled: !s.enabled }).catch(console.error),
-    ),
+    item(t(s.enabled ? "action.disable" : "action.enable"), () => {
+      unmarkStandbySuspended(s.id);
+      return invoke("set_service_enabled", { id: s.id, enabled: !s.enabled }).catch(console.error);
+    }),
     item(t("action.removeMenu"), () => askRemove(s.id), { danger: true, dialog: true }),
   );
   menu.style.left = left === undefined ? "" : `${Math.min(left, window.innerWidth - 230)}px`;
