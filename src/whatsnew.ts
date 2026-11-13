@@ -23,6 +23,7 @@ export const WHATS_NEW: WhatsNewEntry[] = [
         "DevPulse bridge with sound alerts and unread counter badges.",
         "Downloads from every app in one place (Ctrl+J or Manage apps): progress of the ones in progress, then open, show in folder or clear. Files go straight to your Downloads folder.",
         "The sidebar auto-hide can be turned off in Manage apps.",
+        "Thanks to @Nielmix for the first contributions to Pulpo! 🐙",
       ],
       es: [
         "Modo Standby inteligente: las apps que elijas liberan RAM y procesos en segundo plano cuando no las usas. Todas siguen en segundo plano por defecto; desactiva \"Mantener en segundo plano\" en cada app.",
@@ -31,6 +32,7 @@ export const WHATS_NEW: WhatsNewEntry[] = [
         "Integración con DevPulse con alertas de sonido y contador de notificaciones.",
         "Descargas de todas las apps en un solo lugar (Ctrl+J o Administrar apps): el progreso de las que están en curso y luego abrir, mostrar en la carpeta o limpiar. Los archivos van directo a tu carpeta de Descargas.",
         "El ocultamiento automático de la barra lateral se puede desactivar en Administrar apps.",
+        "¡Gracias a @Nielmix por las primeras contribuciones a Pulpo! 🐙",
       ],
       pt: [
         "Modo Standby inteligente: os apps que você escolher liberam memória RAM e processos em segundo plano quando não estão em uso. Todos continuam em segundo plano por padrão; desligue \"Manter em segundo plano\" em cada app.",
@@ -39,6 +41,7 @@ export const WHATS_NEW: WhatsNewEntry[] = [
         "Integração com DevPulse com alertas sonoros e contador de notificações.",
         "Downloads de todos os apps em um só lugar (Ctrl+J ou Gerenciar apps): progresso dos que estão em andamento e depois abrir, mostrar na pasta ou limpar. Os arquivos vão direto para a sua pasta de Downloads.",
         "O recolhimento automático da barra lateral pode ser desligado em Gerenciar apps.",
+        "Obrigado ao @Nielmix pelas primeiras contribuições ao Pulpo! 🐙",
       ],
     },
   },
