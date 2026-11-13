@@ -17,7 +17,7 @@ export const WHATS_NEW: WhatsNewEntry[] = [
     id: "2026-11-12",
     items: {
       en: [
-        "Smart Standby mode: inactive apps automatically suspend and release RAM and background processes, with per-app ignore-close protection.",
+        "Smart Standby mode: apps you choose release RAM and background processes while not in use. Every app stays in the background by default; turn off \"Keep in background\" per app.",
         "Smooth auto-hiding sidebar on home screen and within web apps without screen flicker.",
         "YouTube Music mini player: fixed total track duration display and adaptive dock positioning.",
         "DevPulse bridge with sound alerts and unread counter badges.",
@@ -25,7 +25,7 @@ export const WHATS_NEW: WhatsNewEntry[] = [
         "The sidebar auto-hide can be turned off in Manage apps.",
       ],
       es: [
-        "Modo Standby inteligente: las apps inactivas liberan RAM y procesos en segundo plano automáticamente, con opción de ignorar cierre por app.",
+        "Modo Standby inteligente: las apps que elijas liberan RAM y procesos en segundo plano cuando no las usas. Todas siguen en segundo plano por defecto; desactiva \"Mantener en segundo plano\" en cada app.",
         "Barra lateral con ocultamiento automático suave en la pantalla inicial y dentro de las apps sin parpadeos.",
         "Mini reproductor de YouTube Music: corregida la visualización de la duración total y dock adaptativo.",
         "Integración con DevPulse con alertas de sonido y contador de notificaciones.",
@@ -33,7 +33,7 @@ export const WHATS_NEW: WhatsNewEntry[] = [
         "El ocultamiento automático de la barra lateral se puede desactivar en Administrar apps.",
       ],
       pt: [
-        "Modo Standby inteligente: apps inativos liberam memória RAM e processos em segundo plano automaticamente, com proteção configurável por app.",
+        "Modo Standby inteligente: os apps que você escolher liberam memória RAM e processos em segundo plano quando não estão em uso. Todos continuam em segundo plano por padrão; desligue \"Manter em segundo plano\" em cada app.",
         "Barra lateral com recolhimento e revelação suave na tela inicial e dentro dos apps sem nenhum piscar de tela.",
         "Mini player do YouTube Music: corrigida a exibição da duração total da faixa musical e dock adaptativo.",
         "Integração com DevPulse com alertas sonoros e contador de notificações.",

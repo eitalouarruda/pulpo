@@ -129,18 +129,20 @@ function getStandbyConfig(): Record<string, "on" | "off"> {
   }
 }
 
+/// "Mantener en segundo plano": por defecto sí, como siempre se comportaron
+/// las apps; solo se guardan las que el usuario apagó ("off"). Las "on" de
+/// versiones anteriores siguen valiendo.
 function isAppStandby(id: string): boolean {
   if (!isStandbyMaster()) return false;
-  const cfg = getStandbyConfig();
-  return cfg[id] === "on";
+  return getStandbyConfig()[id] !== "off";
 }
 
 function setAppStandby(id: string, mode: "on" | "off") {
   const cfg = getStandbyConfig();
-  if (mode === "off") {
+  if (mode === "on") {
     delete cfg[id];
   } else {
-    cfg[id] = "on";
+    cfg[id] = "off";
   }
   localStorage.setItem(SB_CFG_KEY, JSON.stringify(cfg));
   if (isStandbyMaster()) {
@@ -1415,7 +1417,7 @@ function openForm(init: FormInit, edit: string | null) {
   form.adblock.checked = init.adblock;
   if (isStandbyMaster()) {
     form.sbBox.hidden = false;
-    form.sb.checked = edit ? isAppStandby(edit) : false;
+    form.sb.checked = edit ? isAppStandby(edit) : true;
   } else {
     form.sbBox.hidden = true;
   }
