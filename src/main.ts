@@ -2,7 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 
 import { periodOf, pickGreeting } from "./greetings";
-import { applyI18n, currentLanguage, type Language, LANGUAGES, setLanguage, t, tError } from "./i18n";
+import { applyI18n, currentLanguage, type Language, LANGUAGES, type MessageKey, setLanguage, t, tError } from "./i18n";
 import { currentTheme, setTheme, THEMES } from "./theme";
 import { setupMusic } from "./music";
 import { WHATS_NEW } from "./whatsnew";
@@ -72,6 +72,7 @@ const views = {
   ciSetup: $("#ci-setup-view"),
   ciToken: $<HTMLFormElement>("#ci-token-view"),
   vault: $<HTMLFormElement>("#vault-view"),
+  downloads: $("#downloads-view"),
 };
 // Reservar el alto real de los widgets para poder desplazar todas las apps.
 const homeDock = $("#home-dock");
@@ -686,7 +687,7 @@ function syncSidebarMode() {
 }
 
 sbEdge.addEventListener("mouseenter", () => {
-  if (!document.body.classList.contains("in-app")) {
+  if (!document.body.classList.contains("in-app") && document.body.classList.contains("sb-autohide")) {
     document.body.classList.add("sb-open");
   }
 });
@@ -2025,9 +2026,11 @@ type Shortcut =
   | { kind: "home" }
   | { kind: "previous" }
   | { kind: "index"; n: number }
-  | { kind: "switcher" };
+  | { kind: "switcher" }
+  | { kind: "downloads" };
 await listen<Shortcut>("shortcut", ({ payload }) => {
   if (payload.kind === "switcher") return openSwitcher();
+  if (payload.kind === "downloads") return toggleDownloads();
   returnTo = null;
   if (!overlay.hidden && !isBase(currentView())) closeOverlay();
   if (payload.kind === "home") goHome();
@@ -2072,6 +2075,12 @@ window.addEventListener("keydown", (e) => {
   if (e.code === "Space" && e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) {
     e.preventDefault();
     if (!e.repeat) openSwitcher();
+    return;
+  }
+  // Ctrl+J: descargas (dentro de una app lo hace su script de inicio).
+  if (e.code === "KeyJ" && e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey) {
+    e.preventDefault();
+    if (!e.repeat) toggleDownloads();
     return;
   }
   // Ctrl+1..9 con el foco en la barra lateral (dentro de una app lo hace su
@@ -2966,6 +2975,173 @@ function showWhatsNew(ids: string[] | null, version?: string) {
   );
   openOverlay("whatsnew");
 }
+
+// ---------------------------------------------------------------- descargas
+
+/// Una descarga de cualquier app (como `downloads::Download`).
+interface Download {
+  id: string;
+  app: string;
+  name: string;
+  url: string;
+  path?: string;
+  received: number;
+  /// 0: tamaño desconocido.
+  total: number;
+  state: "progress" | "done" | "failed" | "canceled";
+  started: number;
+  finished?: number;
+}
+
+let downloads: Download[] = [];
+const dl = {
+  button: $<HTMLButtonElement>("#sb-downloads"),
+  active: $("#downloads-active"),
+  history: $("#downloads-history"),
+  error: $("#downloads-error"),
+};
+
+function formatBytes(n: number): string {
+  const units = ["B", "KB", "MB", "GB", "TB"];
+  let i = 0;
+  while (n >= 1024 && i < units.length - 1) {
+    n /= 1024;
+    i++;
+  }
+  return `${n.toLocaleString(currentLanguage(), { maximumFractionDigits: i && n < 10 ? 1 : 0 })} ${units[i]}`;
+}
+
+function downloadFail(e: unknown) {
+  dl.error.textContent = tError(e);
+}
+
+function downloadButton(label: MessageKey, text: string, run: () => Promise<unknown>) {
+  const b = document.createElement("button");
+  b.type = "button";
+  b.className = "ghost-btn";
+  b.textContent = text;
+  b.title = t(label);
+  b.setAttribute("aria-label", t(label));
+  b.addEventListener("click", () => {
+    dl.error.textContent = "";
+    run().catch(downloadFail);
+  });
+  return b;
+}
+
+function downloadItem(d: Download): HTMLLIElement {
+  const li = document.createElement("li");
+  li.className = `download ${d.state}`;
+  const service = services.find((s) => s.id === d.app);
+  const icon = document.createElement("span");
+  icon.className = "dl-icon";
+  if (service) fillIcon(icon, service);
+  const body = document.createElement("div");
+  body.className = "dl-body";
+  const name = document.createElement("strong");
+  name.textContent = d.name;
+  name.title = d.path ?? d.url;
+  const meta = document.createElement("small");
+  const from = service?.name ?? d.app;
+  if (d.state === "progress") {
+    const bar = document.createElement("div");
+    bar.className = "dl-bar";
+    const fill = document.createElement("div");
+    if (d.total > 0) {
+      fill.style.width = `${Math.min(100, (d.received / d.total) * 100)}%`;
+      meta.textContent = `${t("downloads.of", { received: formatBytes(d.received), total: formatBytes(d.total) })} · ${Math.floor((d.received / d.total) * 100)}% · ${from}`;
+    } else {
+      bar.classList.add("unknown");
+      meta.textContent = `${formatBytes(d.received)} · ${from}`;
+    }
+    bar.append(fill);
+    body.append(name, bar, meta);
+  } else {
+    const when = new Date((d.finished ?? d.started) * 1000).toLocaleString(currentLanguage(), {
+      dateStyle: "short",
+      timeStyle: "short",
+    });
+    const status =
+      d.state === "done" ? formatBytes(d.total || d.received) : t(d.state === "failed" ? "downloads.failed" : "downloads.canceled");
+    meta.textContent = `${status} · ${from} · ${when}`;
+    body.append(name, meta);
+  }
+  const actions = document.createElement("div");
+  actions.className = "dl-actions";
+  if (d.state !== "progress") {
+    if (d.state === "done") {
+      actions.append(
+        downloadButton("downloads.openFile", t("downloads.openFile"), () => invoke("download_open", { id: d.id })),
+        downloadButton("downloads.show", "📁", () => invoke("download_show", { id: d.id })),
+      );
+    }
+    actions.append(downloadButton("downloads.remove", "✕", () => invoke("download_remove", { id: d.id })));
+  }
+  li.append(icon, body, actions);
+  return li;
+}
+
+function renderDownloads() {
+  const active = downloads.filter((d) => d.state === "progress");
+  const done = downloads.filter((d) => d.state !== "progress");
+  // Botón de la barra lateral: solo con descargas en curso, con el total.
+  dl.button.hidden = active.length === 0;
+  const total = active.reduce((n, d) => n + d.total, 0);
+  const received = active.reduce((n, d) => n + d.received, 0);
+  const known = active.every((d) => d.total > 0) && total > 0;
+  dl.button.classList.toggle("unknown", !known);
+  dl.button.style.setProperty("--dl-progress", known ? String(Math.min(100, (received / total) * 100)) : "25");
+  if (views.downloads.hidden) return;
+  $("#downloads-empty").hidden = downloads.length > 0;
+  $("#downloads-active-title").hidden = active.length === 0;
+  $("#downloads-history-title").hidden = done.length === 0;
+  $<HTMLButtonElement>("#downloads-clear").disabled = done.length === 0;
+  dl.active.replaceChildren(...active.map(downloadItem));
+  dl.history.replaceChildren(...done.map(downloadItem));
+}
+
+function openDownloads(from: View | null = null) {
+  dl.error.textContent = "";
+  returnTo = from;
+  openOverlay("downloads");
+  renderDownloads();
+}
+
+/// Ctrl+J: abre las descargas, o las cierra si ya se ven.
+function toggleDownloads() {
+  if (!overlay.hidden && currentView() === "downloads") return closeOverlay();
+  if (!overlay.hidden && !isBase(currentView())) closeOverlay();
+  openDownloads();
+}
+
+await listen<Download[]>("downloads-changed", ({ payload }) => {
+  downloads = payload;
+  renderDownloads();
+});
+downloads = await invoke<Download[]>("downloads_list");
+renderDownloads();
+dl.button.addEventListener("click", () => toggleDownloads());
+$("#downloads-open").addEventListener("click", () => openDownloads("manage"));
+$("#downloads-folder").addEventListener("click", () => {
+  dl.error.textContent = "";
+  invoke("downloads_folder").catch(downloadFail);
+});
+$("#downloads-clear").addEventListener("click", () => invoke("downloads_clear").catch(downloadFail));
+
+// ---------------------------------------------------------------- barra lateral fija
+
+const autohideBox = $<HTMLInputElement>("#sb-autohide");
+function showAutohide(enabled: boolean) {
+  autohideBox.checked = enabled;
+  document.body.classList.toggle("sb-autohide", enabled);
+  if (!enabled) document.body.classList.remove("sb-open");
+}
+autohideBox.addEventListener("change", () => {
+  const enabled = autohideBox.checked;
+  showAutohide(enabled);
+  invoke("set_sidebar_autohide", { enabled }).catch(console.error);
+});
+showAutohide(await invoke<boolean>("sidebar_autohide"));
 
 $("#whatsnew-open").addEventListener("click", () => {
   returnTo = "manage";

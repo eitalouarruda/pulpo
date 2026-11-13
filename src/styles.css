@@ -82,7 +82,8 @@ button {
   z-index: 39;
 }
 
-body.in-app #sb-edge {
+body.in-app #sb-edge,
+body:not(.sb-autohide) #sb-edge {
   pointer-events: none;
 }
 
@@ -96,7 +97,8 @@ body.in-app #sb-edge {
   padding: 12px 0;
 }
 
-body:not(.in-app) #sidebar {
+/* Auto-hide (Gestionar apps): fuera de una app la barra se esconde a la izquierda. */
+body.sb-autohide:not(.in-app) #sidebar {
   position: fixed;
   left: 0;
   top: 0;
@@ -107,11 +109,11 @@ body:not(.in-app) #sidebar {
   transition: transform 0.18s ease;
 }
 
-body:not(.in-app).sb-open #sidebar {
+body.sb-autohide:not(.in-app).sb-open #sidebar {
   transform: translateX(0);
 }
 
-body:not(.in-app) #overlay {
+body.sb-autohide:not(.in-app) #overlay {
   border-left: 0;
 }
 
@@ -2508,7 +2510,8 @@ body.has-wallpaper #home-date {
 }
 
 body.in-app #home-dock,
-body.sb-open #home-dock {
+body.sb-open #home-dock,
+body:not(.sb-autohide) #home-dock {
   left: 80px;
 }
 
@@ -2600,7 +2603,8 @@ body.split.pane-tight #home-view {
   }
 
   body.in-app #home-dock,
-  body.sb-open #home-dock {
+  body.sb-open #home-dock,
+  body:not(.sb-autohide) #home-dock {
     left: 72px;
   }
 
@@ -2656,4 +2660,197 @@ body.split.pane-tight #home-view {
   margin: 0;
   padding-left: 18px;
   line-height: 1.45;
+}
+/* ------------------------------------------------------------ descargas */
+
+#sb-downloads {
+  position: relative;
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--accent, var(--fg));
+  cursor: pointer;
+}
+
+#sb-downloads[hidden] {
+  display: none;
+}
+
+#sb-downloads>svg {
+  grid-area: 1 / 1;
+}
+
+#sb-downloads .dl-ring {
+  width: 36px;
+  height: 36px;
+  transform: rotate(-90deg);
+}
+
+#sb-downloads .dl-ring circle {
+  fill: none;
+  stroke: var(--glass-border);
+  stroke-width: 3;
+}
+
+#sb-downloads .dl-ring .dl-ring-fill {
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-dasharray: var(--dl-progress, 0) 100;
+  transition: stroke-dasharray 0.25s;
+}
+
+#sb-downloads.unknown .dl-ring {
+  animation: dl-spin 1.2s linear infinite;
+}
+
+@keyframes dl-spin {
+  from {
+    transform: rotate(-90deg);
+  }
+
+  to {
+    transform: rotate(270deg);
+  }
+}
+
+#downloads-view {
+  width: min(680px, 100%);
+  overflow: hidden;
+}
+
+#downloads-view header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+#downloads-view header h2 {
+  flex: 1;
+  margin: 0;
+}
+
+#downloads-view h3 {
+  margin: 4px 0 0;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+}
+
+#downloads-error:empty {
+  display: none;
+}
+
+#downloads-scroll {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.downloads-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.download {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.download .dl-icon {
+  flex: none;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 8px;
+  overflow: hidden;
+  font-weight: 600;
+}
+
+.download .dl-icon.letter {
+  background: var(--color);
+  color: #fff;
+}
+
+.download .dl-icon img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.dl-body {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.dl-body strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dl-body small {
+  color: var(--muted);
+}
+
+.download.failed .dl-body small,
+.download.canceled .dl-body small {
+  color: var(--danger, #e5484d);
+}
+
+.dl-bar {
+  position: relative;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--glass-border);
+  overflow: hidden;
+}
+
+.dl-bar>div {
+  height: 100%;
+  border-radius: 3px;
+  background: var(--accent, #6e56cf);
+  transition: width 0.25s;
+}
+
+.dl-bar.unknown>div {
+  width: 30%;
+  animation: dl-slide 1.2s ease-in-out infinite;
+}
+
+@keyframes dl-slide {
+  from {
+    transform: translateX(-100%);
+  }
+
+  to {
+    transform: translateX(340%);
+  }
+}
+
+.dl-actions {
+  flex: none;
+  display: flex;
+  gap: 6px;
 }

@@ -41,6 +41,8 @@ pub enum Shortcut {
     Fill,
     /// Clic en una notificación que mostró la página.
     Notification,
+    /// Ctrl+J: la vista de descargas.
+    Downloads,
     /// Borde izquierdo dentro de la app: abrir/cerrar la barra lateral.
     SidebarShow,
     SidebarHide,
@@ -65,6 +67,7 @@ pub fn parse(title: &str) -> Option<Shortcut> {
         "switcher" => Some(Shortcut::Switcher),
         "fill" => Some(Shortcut::Fill),
         "notification" => Some(Shortcut::Notification),
+        "downloads" => Some(Shortcut::Downloads),
         "s1" => Some(Shortcut::SidebarShow),
         "s0" => Some(Shortcut::SidebarHide),
         n => n
@@ -142,6 +145,11 @@ pub fn script() -> String {
       e.preventDefault();
       e.stopImmediatePropagation();
       if (!e.repeat) signal("fill");
+    }}
+    if (e.ctrlKey && !e.altKey && !e.shiftKey && !e.metaKey && e.code === "KeyJ") {{
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      if (!e.repeat) signal("downloads");
     }}
   }}, true);
   window.addEventListener("keyup", (e) => {{
@@ -304,6 +312,7 @@ mod tests {
             parse(&format!("{m}notification")),
             Some(Shortcut::Notification)
         );
+        assert_eq!(parse(&format!("{m}downloads")), Some(Shortcut::Downloads));
         assert_eq!(parse(&format!("{m}s1")), Some(Shortcut::SidebarShow));
         assert_eq!(parse(&format!("{m}s0")), Some(Shortcut::SidebarHide));
         assert_eq!(parse(&format!("{m}3")), Some(Shortcut::Index { n: 3 }));

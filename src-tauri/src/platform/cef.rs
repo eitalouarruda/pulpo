@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 
 use blocker::Blocker;
-use tauri::Webview;
+use tauri::{Manager, Webview};
 
 use crate::services::Theme;
 use tauri_runtime_cef::cef;
@@ -86,6 +86,9 @@ pub fn attach(
     if let Err(e) = super::enable_drag(webview) {
         eprintln!("[pulpo] {url}: arrastrar y soltar no disponible: {e}");
     }
+    if let Err(e) = watch_downloads(webview) {
+        eprintln!("[pulpo] {url}: sin progreso de descargas: {e}");
+    }
     if let Some(blocker) = blocker.filter(|_| !crate::diag::flag("PULPO_NO_NETFILTER")) {
         if let Err(e) = enable_blocking(webview, blocker, url.to_string()) {
             eprintln!("[pulpo] bloqueo de red desactivado en {url}: {e}");
@@ -126,6 +129,29 @@ fn set_theme(webview: &Webview, theme: Theme) -> Result<(), String> {
         )?;
     }
     Ok(())
+}
+
+/// Progreso de las descargas de esta app: con `eventsEnabled` Chromium manda
+/// `Browser.downloadWillBegin`/`downloadProgress`; `default` deja el destino a
+/// `on_download` (ver `downloads`).
+fn watch_downloads(webview: &Webview) -> Result<(), String> {
+    let app = webview.app_handle().clone();
+    let label = webview.label().to_string();
+    webview
+        .on_dev_tools_protocol(move |message| {
+            if let DevToolsProtocol::Message(raw) = message {
+                crate::downloads::devtools_message(&app, &label, &raw);
+            }
+        })
+        .map_err(|e| e.to_string())?;
+    let message = serde_json::json!({
+        "id": allocate_devtools_message_id().map_err(|e| e.to_string())?,
+        "method": "Browser.setDownloadBehavior",
+        "params": { "behavior": "default", "eventsEnabled": true },
+    });
+    webview
+        .send_dev_tools_message(message.to_string().as_bytes())
+        .map_err(|e| e.to_string())
 }
 
 fn enable_blocking(

@@ -21,6 +21,16 @@
           <path d="M9 2v14M2 9h14" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
         </svg>
       </button>
+      <!-- Solo con descargas en curso: el anillo muestra el progreso total. -->
+      <button id="sb-downloads" type="button" hidden data-i18n-title="sidebar.downloads" data-i18n-label="sidebar.downloads">
+        <svg class="dl-ring" viewBox="0 0 36 36" aria-hidden="true">
+          <circle cx="18" cy="18" r="16" pathLength="100" />
+          <circle class="dl-ring-fill" cx="18" cy="18" r="16" pathLength="100" />
+        </svg>
+        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true">
+          <path d="M12 4v11M7 10l5 5 5-5M5 20h14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </button>
       <button id="vault" type="button" hidden data-i18n-title="sidebar.vault" data-i18n-label="sidebar.vault">
         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
           <circle cx="8" cy="15" r="4" fill="none" stroke="currentColor" stroke-width="2" />
@@ -114,6 +124,13 @@
           <button type="button" class="ghost-btn" id="zoom-auto" data-i18n-title="zoom.reset" data-i18n="zoom.auto"></button>
         </div>
         <ul id="manage-list"></ul>
+        <label class="check">
+          <input id="sb-autohide" type="checkbox" />
+          <span>
+            <span data-i18n="manage.autohide"></span>
+            <small data-i18n="manage.autohideHint"></small>
+          </span>
+        </label>
         <div class="ci-settings">
           <label class="check">
             <input id="sb-master" type="checkbox" />
@@ -172,6 +189,10 @@
           <div id="theme" class="segmented" role="radiogroup"></div>
         </div>
         <div class="zoom-row">
+          <span data-i18n="downloads.manage"></span>
+          <button type="button" class="ghost-btn" id="downloads-open" data-i18n="downloads.open"></button>
+        </div>
+        <div class="zoom-row">
           <span data-i18n="whatsnew.title"></span>
           <button type="button" class="ghost-btn" id="whatsnew-open" data-i18n="whatsnew.open"></button>
         </div>
@@ -180,6 +201,24 @@
           <button type="button" class="ghost-btn" id="wallpaper-open" data-i18n="wallpaper.choose"></button>
         </div>
         <p class="hint" data-i18n="manage.hint"></p>
+      </section>
+
+      <!-- Descargas de todas las apps (Ctrl+J): en curso con su progreso y el historial. -->
+      <section class="card" id="downloads-view" hidden>
+        <header>
+          <h2 data-i18n="downloads.title"></h2>
+          <button type="button" class="ghost-btn" id="downloads-folder" data-i18n="downloads.folder"></button>
+          <button type="button" class="ghost-btn" id="downloads-clear" data-i18n="downloads.clear"></button>
+          <button type="button" class="ghost-btn" data-close data-i18n="manage.close"></button>
+        </header>
+        <p id="downloads-error" class="error" role="alert"></p>
+        <div id="downloads-scroll">
+          <p id="downloads-empty" class="hint" data-i18n="downloads.empty"></p>
+          <h3 id="downloads-active-title" data-i18n="downloads.active" hidden></h3>
+          <ul id="downloads-active" class="downloads-list"></ul>
+          <h3 id="downloads-history-title" data-i18n="downloads.history" hidden></h3>
+          <ul id="downloads-history" class="downloads-list"></ul>
+        </div>
       </section>
 
       <!-- Fondo de pantalla (inicio, CI y diálogos): página completa; arriba fijo, abajo los

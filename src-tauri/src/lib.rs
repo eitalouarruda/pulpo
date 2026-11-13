@@ -4,6 +4,7 @@ mod ci;
 mod diag;
 mod display;
 mod dnd;
+mod downloads;
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 mod file_drop;
 mod icons;
@@ -31,7 +32,8 @@ use std::time::{Duration, Instant};
 use blocker::Blocker;
 use serde::Serialize;
 use tauri::webview::{
-    NewWindowResponse, PageLoadEvent, PermissionKind, PermissionResponse, WebviewBuilder,
+    DownloadEvent, NewWindowResponse, PageLoadEvent, PermissionKind, PermissionResponse,
+    WebviewBuilder,
 };
 use tauri::window::WindowBuilder;
 use tauri::{
@@ -259,9 +261,42 @@ fn set_sidebar_open(app: AppHandle, open: bool) {
     }
 }
 
+/// Barra lateral que se oculta sola (por defecto) o fija.
+#[tauri::command]
+fn sidebar_autohide(app: AppHandle) -> bool {
+    !sidebar_pinned(&app)
+}
+
+#[tauri::command]
+fn set_sidebar_autohide(app: AppHandle, enabled: bool) {
+    let state = app.state::<AppState>();
+    {
+        let mut settings = state.settings.lock().unwrap();
+        settings.sidebar_pinned = !enabled;
+        if let Err(e) = display::save(&state.settings_path, &settings) {
+            eprintln!(
+                "[pulpo] no se pudo guardar {}: {e}",
+                state.settings_path.display()
+            );
+        }
+    }
+    state.sidebar_open.store(false, Ordering::SeqCst);
+    layout(&app);
+}
+
+fn sidebar_pinned(app: &AppHandle) -> bool {
+    app.state::<AppState>()
+        .settings
+        .lock()
+        .unwrap()
+        .sidebar_pinned
+}
+
 #[tauri::command]
 fn set_standby_master(app: AppHandle, enabled: bool) {
-    app.state::<AppState>().standby_master.store(enabled, Ordering::SeqCst);
+    app.state::<AppState>()
+        .standby_master
+        .store(enabled, Ordering::SeqCst);
 }
 
 #[tauri::command]
@@ -788,6 +823,7 @@ pub fn run() {
             #[cfg(target_os = "linux")]
             display::guard_focus(data_dir.join("focus.log"));
             dnd::watch(app.handle());
+            app.manage(downloads::Downloads::load(&data_dir));
             app.manage(bitwarden::Vault::default());
             app.manage(ci::Ci::default());
             ci::watch(app.handle());
@@ -897,7 +933,15 @@ pub fn run() {
             activate_service,
             show_home,
             set_sidebar_open,
+            sidebar_autohide,
+            set_sidebar_autohide,
             set_standby_master,
+            downloads::downloads_list,
+            downloads::download_open,
+            downloads::download_show,
+            downloads::downloads_folder,
+            downloads::download_remove,
+            downloads::downloads_clear,
             get_zoom,
             change_zoom,
             reload_service,
@@ -1152,17 +1196,22 @@ fn close_webview(app: &AppHandle, id: &str) {
     };
 
     #[cfg(windows)]
-    let standby_active = app.state::<AppState>().standby_master.load(Ordering::SeqCst);
+    let standby_active = app
+        .state::<AppState>()
+        .standby_master
+        .load(Ordering::SeqCst);
 
     #[cfg(windows)]
     let browser_pid = if standby_active {
-        let _ = webview.eval(r#"(() => {
+        let _ = webview.eval(
+            r#"(() => {
             try {
                 window.__pulpoVolume && window.__pulpoVolume(0);
                 for (const m of document.querySelectorAll('audio, video')) m.pause();
                 window.location.replace('about:blank');
             } catch (_) {}
-        })();"#);
+        })();"#,
+        );
 
         get_webview_browser_pid(&webview)
     } else {
@@ -1434,6 +1483,27 @@ fn open_service(
                 #[cfg(not(any(target_os = "linux", target_os = "macos")))]
                 let _ = payload;
             })
+            // Todas a la carpeta de descargas, sin diálogo, con su progreso en
+            // la vista de descargas (ver `downloads`).
+            .on_download(|webview, event| match event {
+                DownloadEvent::Requested { url, destination } => downloads::requested(
+                    webview.app_handle(),
+                    webview.label(),
+                    url.as_str(),
+                    destination,
+                ),
+                DownloadEvent::Finished { url, path, success } => {
+                    downloads::finished(
+                        webview.app_handle(),
+                        webview.label(),
+                        url.as_str(),
+                        path.as_deref(),
+                        success,
+                    );
+                    true
+                }
+                _ => true,
+            })
             .on_new_window({
                 let app = app.clone();
                 move |url, features| {
@@ -1497,11 +1567,12 @@ fn open_service(
         }
     }
 
-    let initial_x = if app.state::<AppState>().sidebar_open.load(Ordering::SeqCst) {
-        SIDEBAR_WIDTH
-    } else {
-        0.0
-    };
+    let initial_x =
+        if app.state::<AppState>().sidebar_open.load(Ordering::SeqCst) || sidebar_pinned(app) {
+            SIDEBAR_WIDTH
+        } else {
+            0.0
+        };
     let webview = window.add_child(
         builder
             .position(LogicalPosition::new(initial_x, 0.0))
@@ -1560,8 +1631,9 @@ fn open_link(app: &AppHandle, url: Url, id: Option<String>) {
 fn on_shortcut(app: &AppHandle, shortcut: shortcuts::Shortcut, id: &str) {
     match shortcut {
         shortcuts::Shortcut::Home => show_home(app.clone()),
-        // El selector se escribe en la barra lateral: el teclado pasa a ella.
-        shortcuts::Shortcut::Switcher => {
+        // El selector se escribe en la barra lateral, y Esc cierra las
+        // descargas: el teclado pasa a ella.
+        shortcuts::Shortcut::Switcher | shortcuts::Shortcut::Downloads => {
             if let Some(shell) = app.get_webview("shell") {
                 let _ = shell.set_focus();
             }
@@ -1686,7 +1758,9 @@ fn apply_layout(app: &AppHandle) {
     let size = size.to_logical::<f64>(scale);
     let state = app.state::<AppState>();
     let overlay = state.overlay.load(Ordering::SeqCst);
-    let sidebar_open = state.sidebar_open.load(Ordering::SeqCst);
+    // Fija: las apps empiezan siempre a su derecha.
+    let sidebar_open =
+        state.sidebar_open.load(Ordering::SeqCst) || state.settings.lock().unwrap().sidebar_pinned;
     // La barra lateral crece con el zoom, como su contenido.
     let sidebar = (SIDEBAR_WIDTH * *state.zoom.lock().unwrap()).round();
     if let Some(shell) = app.get_webview("shell") {
