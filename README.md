@@ -188,15 +188,21 @@ cd src-tauri
 cargo run --release -p blocker --example inspect --features content-blocking -- https://music.youtube.com/
 ```
 
-Every push to `main` runs the main **Build** workflow and publishes a GitHub
-release with the AppImage (built on Arch and smoke-tested on Ubuntu), Windows
-installers, and macOS DMGs for Intel and Apple Silicon. Publication waits for
-all platforms and the macOS installer uploads to succeed.
+The **Build Linux**, **Build Windows**, and **Build macOS** workflows run
+independently. Each OS validates and uploads its own installers without waiting
+for the others. Linux builds its AppImage on Arch and smoke-tests it on Ubuntu;
+Windows produces NSIS/MSI installers; macOS produces Intel and Apple Silicon
+DMGs. Download artifacts from the corresponding Actions run or the release page.
+
+All workflows use `MAJOR.MINOR.<commit count>` (full Git history), so the same
+commit has the same version on every OS. A release becomes public as soon as
+one OS passes, and other systems add their files when ready. A failed OS keeps
+its previous downloadable version; rerun only that OS after fixing it. All three
+workflows also support **Run workflow** in Actions.
 
 ### macOS builds and validation
 
-The **Build macOS** jobs in the main workflow also run on pull requests and
-manual workflow runs. They build versioned `.app` bundles and `.dmg` installers
+The **Build macOS** workflow also runs on pull requests and manual runs. They build versioned `.app` bundles and `.dmg` installers
 using CEF/Chromium and the same Brave blocker as Linux. Installers are available
 as `macos-installers-*` workflow artifacts and, for releases, on the release
 page alongside Linux and Windows. The minimum configured macOS version is 13;

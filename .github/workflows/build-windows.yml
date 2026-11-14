@@ -1,0 +1,107 @@
+name: Build Windows
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+permissions:
+  contents: read
+
+env:
+  # Versión de CEF (Chromium) que usa tauri-runtime-cef; la clave de su caché.
+  CEF_VERSION: "152.0.6"
+  # La AppImage usa ese mismo CEF pero con códecs propietarios (H.264, AAC: los
+  # GIF de Discord son MP4, videos, audios), armado con scripts/cef-codecs.sh
+  # y subido a la release cef-<versión>-codecs. Al cambiar CEF_VERSION hay que
+  # correr `scripts/cef-codecs.sh <versión> --upload` y poner aquí el sha256.
+  CEF_CODECS_SHA256: "74a0a90bf5072f67cc2ebb28f27011ce305e0842017034c511a0f4687723a394"
+  # El CLI de Tauri 3 arma la AppImage con quick-sharun (Anylinux-AppImages),
+  # que baja estas piezas de la rama main; en sep/2026 se movieron y las rutas
+  # dan 404. Se fijan al último commit que las tenía.
+  ANYLINUX_BASE: https://raw.githubusercontent.com/pkgforge-dev/Anylinux-AppImages/5e76c43e12c20ccb2f705c6098ca141b2fd368f8/useful-tools
+
+jobs:
+  version:
+    runs-on: ubuntu-24.04
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+      - id: version
+        shell: bash
+        run: |
+          base=$(jq -r .version src-tauri/tauri.conf.json | cut -d. -f1,2)
+          # Same version for the same commit across independent workflows.
+          echo "version=$base.$(git rev-list --count HEAD)" >> "$GITHUB_OUTPUT"
+
+  test:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - name: Placeholder frontend
+        shell: bash
+        run: mkdir -p dist && echo '<!doctype html>' > dist/index.html
+      - name: Clippy
+        run: cargo clippy --locked --manifest-path src-tauri/Cargo.toml --workspace --all-targets -- -D warnings
+      - name: Tests
+        run: cargo test --locked --manifest-path src-tauri/Cargo.toml --workspace
+
+  build-windows:
+    needs: [version, test]
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      VERSION: ${{ needs.version.outputs.version }}
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+      # Sin `version`: usa la de "packageManager" en package.json (pnpm 11).
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+      - run: pnpm install --frozen-lockfile
+      - name: Set release version
+        shell: bash
+        run: |
+          node -e '
+            const fs = require("fs");
+            const p = "src-tauri/tauri.conf.json";
+            const c = JSON.parse(fs.readFileSync(p, "utf8"));
+            c.version = process.env.VERSION;
+            fs.writeFileSync(p, JSON.stringify(c, null, 2));
+          '
+      - name: Build
+        run: pnpm tauri build --bundles nsis,msi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-installers
+          path: |
+            src-tauri/target/release/bundle/nsis/*.exe
+            src-tauri/target/release/bundle/msi/*.msi
+          if-no-files-found: error
+      - name: Upload to release
+        shell: bash
+        run: |
+          bash scripts/publish-release.sh \
+            src-tauri/target/release/bundle/nsis/*.exe \
+            src-tauri/target/release/bundle/msi/*.msi
+
