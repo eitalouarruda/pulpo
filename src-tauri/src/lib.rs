@@ -1230,29 +1230,29 @@ fn close_webview(app: &AppHandle, id: &str) {
     }
 }
 
+/// PID del navegador de WebView2 de este webview (0 si no se pudo leer).
+/// `with_webview` corre en el hilo principal: se espera su respuesta, como
+/// mucho un segundo (no se llama desde el hilo principal).
 #[cfg(windows)]
 fn get_webview_browser_pid(webview: &tauri::Webview) -> u32 {
-    let pid_arc = std::sync::Arc::new(std::sync::Mutex::new(0u32));
-    let pid_clone = pid_arc.clone();
-    let _ = webview.with_webview(move |platform| {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let posted = webview.with_webview(move |platform| {
+        let mut pid = 0u32;
         if let Some(wry_webview) = platform.downcast_ref::<tauri_runtime_wry::Webview>() {
-            unsafe {
-                if let Ok(core) = wry_webview.controller().CoreWebView2() {
-                    let mut pid = 0u32;
-                    if core.BrowserProcessId(&mut pid).is_ok() {
-                        *pid_clone.lock().unwrap() = pid;
-                    }
-                }
+            if let Ok(core) = unsafe { wry_webview.controller().CoreWebView2() } {
+                let _ = unsafe { core.BrowserProcessId(&mut pid) };
             }
         }
+        let _ = tx.send(pid);
     });
-    let result = *pid_arc.lock().unwrap();
-    result
+    if posted.is_err() {
+        return 0;
+    }
+    rx.recv_timeout(Duration::from_secs(1)).unwrap_or(0)
 }
 
 #[cfg(windows)]
 fn terminate_app_processes(browser_pid: u32) {
-    use std::time::{Duration, Instant};
     use windows::Win32::Foundation::{CloseHandle, HANDLE};
     use windows::Win32::System::Diagnostics::ToolHelp::{
         CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W,
@@ -1278,10 +1278,8 @@ fn terminate_app_processes(browser_pid: u32) {
                 };
                 let mut more = Process32FirstW(snapshot, &mut entry).is_ok();
                 while more {
-                    if entry.th32ParentProcessID == parent {
-                        if !tree.contains(&entry.th32ProcessID) {
-                            tree.push(entry.th32ProcessID);
-                        }
+                    if entry.th32ParentProcessID == parent && !tree.contains(&entry.th32ProcessID) {
+                        tree.push(entry.th32ProcessID);
                     }
                     more = Process32NextW(snapshot, &mut entry).is_ok();
                 }

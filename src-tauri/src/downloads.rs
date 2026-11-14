@@ -54,6 +54,7 @@ pub struct Download {
     /// cancelar por ahí: `Browser.cancelDownload` solo encuentra el contexto
     /// por defecto, y cada app tiene su perfil.
     #[serde(default, skip_serializing)]
+    #[cfg_attr(windows, allow(dead_code))]
     guid: Option<String>,
 }
 
@@ -277,8 +278,9 @@ fn finish(d: &mut Download, state: State) {
     }
 }
 
-/// Evento del DevTools Protocol de la app `label`. Ignora los que no son de
-/// descargas sin parsearlos.
+/// Evento del DevTools Protocol de la app `label` (solo CEF). Ignora los que
+/// no son de descargas sin parsearlos.
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 pub fn devtools_message(app: &AppHandle, label: &str, raw: &[u8]) {
     if !raw.starts_with(br#"{"method":"Browser.download"#) {
         return;

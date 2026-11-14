@@ -91,11 +91,25 @@ jobs:
         run: |
           # Ubuntu restringe los user namespaces: CEF necesita el helper SUID.
           # Solo se configura el binario generado en este runner efímero.
+          # Si algo falla, el motivo va como anotación (se ve sin abrir el log).
           sandbox=src-tauri/target/debug/chrome-sandbox
-          test -f "$sandbox"
-          sudo chown root:root "$sandbox"
-          sudo chmod 4755 "$sandbox"
-          test "$(stat -c '%u:%g:%a' "$sandbox")" = '0:0:4755'
+          if [ ! -f "$sandbox" ]; then
+            # Viene de la distribución de CEF; con la caché vacía se busca ahí.
+            src=$(find "$HOME/.cache/tauri-cef" src-tauri/target/debug/build -name chrome-sandbox -type f 2>/dev/null | head -n 1)
+            if [ -z "$src" ]; then
+              echo "::error::chrome-sandbox no está en target/debug ni en la distribución de CEF: $(ls src-tauri/target/debug | tr '\n' ' ' | head -c 800)"
+              exit 1
+            fi
+            echo "::warning::chrome-sandbox copiado de $src"
+            cp "$src" "$sandbox"
+          fi
+          sudo chown root:root "$sandbox" || { echo "::error::chown de chrome-sandbox falló"; exit 1; }
+          sudo chmod 4755 "$sandbox" || { echo "::error::chmod de chrome-sandbox falló"; exit 1; }
+          got=$(stat -c '%u:%g:%a' "$sandbox")
+          if [ "$got" != '0:0:4755' ]; then
+            echo "::error::chrome-sandbox quedó $got ($(stat -c '%A %U' "$sandbox"), montaje: $(findmnt -no OPTIONS -T "$sandbox"))"
+            exit 1
+          fi
       - name: Native external file drop regression
         if: runner.os == 'Linux'
         env:
