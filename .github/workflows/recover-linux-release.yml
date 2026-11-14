@@ -1,0 +1,60 @@
+name: Recover Linux release
+on:
+  push:
+    branches: [ci/recover-linux-release]
+  workflow_dispatch:
+permissions:
+  actions: read
+  contents: write
+jobs:
+  publish:
+    runs-on: ubuntu-24.04
+    env:
+      SOURCE_RUN: '43599038781'
+      RELEASE_COMMIT: 5b5a2f68ec4927fe24c50248e4ed359ad679803f
+      VERSION: 0.1.42
+      GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - uses: actions/checkout@v5
+      - name: Verify previously validated artifact source
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected=$RELEASE_COMMIT
+          actual=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN" --jq .head_sha)
+          test "$actual" = "$expected"
+          echo "RELEASE_COMMIT=$expected" >> "$GITHUB_ENV"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$SOURCE_RUN/jobs" > /tmp/source-jobs.json
+          jq -e '[.jobs[] | select(.name == "test" or .name == "build-linux") | .conclusion] | length == 2 and all(. == "success")' /tmp/source-jobs.json
+          jq -e 'any(.jobs[].steps[]; .name == "Smoke test AppImage" and .conclusion == "success")' /tmp/source-jobs.json
+      - uses: actions/download-artifact@v4
+        with:
+          name: appimage
+          run-id: ${{ env.SOURCE_RUN }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+      - run: sudo apt-get update && sudo apt-get install -y xvfb
+      - name: Smoke test AppImage
+        shell: bash
+        run: |
+          set -euo pipefail
+          img=$(ls *.AppImage)
+          ls -lh "$img"
+          chmod +x "$img"
+          home=$(mktemp -d)
+          # Sin FUSE en el runner: el runtime extrae y ejecuta.
+          APPIMAGE_EXTRACT_AND_RUN=1 \
+          XDG_DATA_HOME=$home/data XDG_CACHE_HOME=$home/cache XDG_CONFIG_HOME=$home/config \
+            xvfb-run -a "./$img" > smoke.log 2>&1 &
+          pid=$!
+          sleep 30
+          fail() { echo "$1"; cat smoke.log; exit 1; }
+          kill -0 "$pid" 2>/dev/null || fail "La AppImage se cerró al arrancar:"
+          test -d "$home/data/com.pulpo.app/cef" || fail "No llegó a iniciar Chromium:"
+          # Choques de versiones entre lo empaquetado y el sistema.
+          if grep -E "version \`[A-Z_0-9.]+' not found|FATAL:|undefined symbol" smoke.log; then
+            fail "Errores de librerías:"
+          fi
+          echo "Arrancó bien:"; tail -n 20 smoke.log
+          kill "$pid" || true
+      - name: Publish validated AppImage
+        run: bash scripts/publish-release.sh *.AppImage
