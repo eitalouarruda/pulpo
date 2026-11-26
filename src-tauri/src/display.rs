@@ -50,6 +50,12 @@ pub struct Settings {
     /// Barra lateral fija, sin ocultarse sola (por defecto se oculta).
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub sidebar_pinned: bool,
+    /// Túnel WireGuard por app (ver `vpn`).
+    #[serde(
+        default,
+        skip_serializing_if = "crate::vpn::config::VpnSettings::is_default"
+    )]
+    pub vpn: crate::vpn::config::VpnSettings,
     /// Fondo de la página inicial: un archivo de `<datos>/wallpapers`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wallpaper: Option<String>,
@@ -344,6 +350,9 @@ mod tests {
 
     #[test]
     fn older_settings_leave_music_disabled() {
-        assert!(!serde_json::from_str::<Settings>("{}").unwrap().music_player);
+        let settings: Settings = serde_json::from_str("{}").unwrap();
+        assert!(!settings.music_player);
+        assert!(!settings.vpn.enabled);
+        assert!(settings.vpn.services.is_empty());
     }
 }

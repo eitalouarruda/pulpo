@@ -72,6 +72,7 @@ const views = {
   ciSetup: $("#ci-setup-view"),
   ciToken: $<HTMLFormElement>("#ci-token-view"),
   vault: $<HTMLFormElement>("#vault-view"),
+  vpn: $("#vpn-view"),
   downloads: $("#downloads-view"),
 };
 // Reservar el alto real de los widgets para poder desplazar todas las apps.
@@ -2006,6 +2007,7 @@ await listen<Service[]>("services-changed", (e) => {
   markCurrent();
   if (currentView() === "manage" && !overlay.hidden) renderManage();
   else if (currentView() === "switcher" && !overlay.hidden) renderSwitcher();
+  else if (currentView() === "vpn" && !overlay.hidden) renderVpn();
   else showBase();
 });
 await listen<{ id: string; count: number }>("badge", ({ payload }) => {
@@ -2458,6 +2460,12 @@ views.ciToken.addEventListener("submit", (e) => {
 });
 // Enlaces de la ayuda: al navegador del sistema (la barra lateral no navega).
 overlay.addEventListener("click", (e) => {
+  const vpnLink = (e.target as HTMLElement).closest<HTMLAnchorElement>("a[data-vpn-external]");
+  if (vpnLink) {
+    e.preventDefault();
+    invoke("vpn_open_proton").catch(console.error);
+    return;
+  }
   const link = (e.target as HTMLElement).closest<HTMLAnchorElement>("a[data-external]");
   if (!link) return;
   e.preventDefault();
@@ -2945,6 +2953,393 @@ vaultEnabledBox.addEventListener("change", () =>
 );
 showVaultEnabled(await invoke<boolean>("bw_enabled"));
 await listen<boolean>("bw-enabled", ({ payload }) => showVaultEnabled(payload));
+
+// ---------------------------------------------------------------- VPN
+
+interface VpnProfileSummary {
+  id: string;
+  label: string;
+  endpoint: string;
+  health: "ok" | "error" | null;
+  latency_ms: number | null;
+}
+
+interface VpnNotice {
+  id: number;
+  kind: "switched" | "all_failed";
+  from: string;
+  to: string | null;
+  latency_ms: number | null;
+}
+
+interface VpnStatus {
+  state: "disabled" | "unconfigured" | "ready" | "connected" | "error";
+  label: string | null;
+  endpoint: string | null;
+  profiles: VpnProfileSummary[];
+  active_profile_id: string | null;
+  auto_failover: boolean;
+  services: string[];
+  error: string | null;
+  notice: VpnNotice | null;
+}
+
+const MAX_VPN_PROFILES = 3;
+
+const vpn = {
+  button: $<HTMLButtonElement>("#vpn"),
+  enabledBox: $<HTMLInputElement>("#vpn-enabled"),
+  badge: $("#vpn-badge"),
+  count: $("#vpn-count"),
+  profiles: $("#vpn-profiles"),
+  importBtn: $<HTMLButtonElement>("#vpn-import"),
+  failoverBox: $<HTMLInputElement>("#vpn-failover"),
+  file: $<HTMLInputElement>("#vpn-file"),
+  services: $("#vpn-services"),
+  feedback: $("#vpn-feedback"),
+  error: $("#vpn-error"),
+};
+
+let vpnStatus: VpnStatus = {
+  state: "disabled",
+  label: null,
+  endpoint: null,
+  profiles: [],
+  active_profile_id: null,
+  auto_failover: true,
+  services: [],
+  error: null,
+  notice: null,
+};
+let vpnBusy = false;
+let vpnLocalError = "";
+let lastVpnNoticeId = 0;
+const vpnPings = new Map<string, { state: "testing" | "ok" | "error"; ms?: number }>();
+
+function formatVpnNotice(notice: VpnNotice): string {
+  if (notice.kind === "switched") {
+    return t("vpn.notice.switched", {
+      from: notice.from,
+      to: notice.to ?? "WireGuard",
+      ms: notice.latency_ms ?? 0,
+    });
+  }
+  return t("vpn.notice.allFailed", { from: notice.from });
+}
+
+function setVpnBusy(busy: boolean) {
+  vpnBusy = busy;
+  vpn.importBtn.disabled = busy || vpnStatus.profiles.length >= MAX_VPN_PROFILES;
+  vpn.failoverBox.disabled = busy;
+  for (const btn of vpn.profiles.querySelectorAll<HTMLButtonElement>("button")) {
+    btn.disabled = busy;
+  }
+  for (const box of vpn.services.querySelectorAll<HTMLInputElement>("input[type=checkbox]")) {
+    box.disabled = busy;
+  }
+}
+
+function renderVpn() {
+  const enabled = vpnStatus.state !== "disabled";
+  vpn.button.hidden = !enabled;
+  vpn.button.dataset.state = vpnStatus.state;
+  vpn.enabledBox.checked = enabled;
+
+  vpn.badge.textContent = t(`vpn.state.${vpnStatus.state}`);
+  vpn.badge.dataset.state = vpnStatus.state;
+
+  const validIds = new Set(vpnStatus.profiles.map((p) => p.id));
+  for (const id of [...vpnPings.keys()]) {
+    if (!validIds.has(id)) vpnPings.delete(id);
+  }
+  for (const p of vpnStatus.profiles) {
+    if (vpnPings.get(p.id)?.state === "testing") continue;
+    if (p.health === "ok" && p.latency_ms !== null) {
+      vpnPings.set(p.id, { state: "ok", ms: p.latency_ms });
+    } else if (p.health === "error") {
+      vpnPings.set(p.id, { state: "error" });
+    }
+  }
+
+  const notice = vpnStatus.notice;
+  const noticeText = notice ? formatVpnNotice(notice) : "";
+  if (notice && notice.id !== lastVpnNoticeId) {
+    lastVpnNoticeId = notice.id;
+    invoke("vpn_notify", {
+      summary: t("vpn.title"),
+      body: noticeText,
+      ok: notice.kind === "switched",
+    }).catch(console.error);
+  }
+
+  const hasConf = vpnStatus.profiles.length > 0;
+  vpn.count.textContent = t("vpn.profilesCount", { count: vpnStatus.profiles.length });
+  vpn.importBtn.disabled = vpnBusy || vpnStatus.profiles.length >= MAX_VPN_PROFILES;
+  vpn.failoverBox.checked = vpnStatus.auto_failover;
+  vpn.failoverBox.disabled = vpnBusy;
+  if (notice?.kind === "switched") {
+    showVpnFeedback(noticeText);
+    vpn.error.textContent = vpnStatus.error ? tError(vpnStatus.error) : "";
+  } else if (notice?.kind === "all_failed") {
+    showVpnFeedback("");
+    vpn.error.textContent = noticeText;
+  } else {
+    vpn.error.textContent = vpnStatus.error ? tError(vpnStatus.error) : vpnLocalError;
+  }
+
+  if (!hasConf) {
+    const empty = document.createElement("div");
+    empty.className = "vpn-meta";
+    const title = document.createElement("strong");
+    title.textContent = t("vpn.unconfiguredLabel");
+    const sub = document.createElement("small");
+    sub.textContent = t("vpn.noEndpoint");
+    empty.append(title, sub);
+    vpn.profiles.replaceChildren(empty);
+  } else {
+    vpn.profiles.replaceChildren(
+      ...vpnStatus.profiles.map((p) => {
+        const isActive =
+          vpnStatus.active_profile_id === p.id ||
+          (!vpnStatus.active_profile_id && vpnStatus.profiles[0]?.id === p.id);
+        const row = document.createElement("div");
+        row.className = "vpn-profile-row";
+        row.dataset.active = isActive ? "true" : "false";
+
+        const selectBtn = document.createElement("button");
+        selectBtn.type = "button";
+        selectBtn.className = "vpn-profile-select";
+        selectBtn.disabled = vpnBusy;
+
+        const info = document.createElement("div");
+        info.className = "vpn-profile-info";
+        const name = document.createElement("strong");
+        name.textContent = p.label || "WireGuard";
+        const endpoint = document.createElement("small");
+        endpoint.textContent = p.endpoint;
+        info.append(name, endpoint);
+        selectBtn.append(info);
+
+        if (isActive) {
+          const pill = document.createElement("span");
+          pill.className = "vpn-profile-active";
+          pill.textContent = t("vpn.activeBadge");
+          selectBtn.append(pill);
+        }
+
+        selectBtn.addEventListener("click", async () => {
+          if (vpnBusy || isActive) return;
+          vpnLocalError = "";
+          setVpnBusy(true);
+          showVpnFeedback("");
+          vpn.error.textContent = "";
+          try {
+            await invoke("vpn_select_profile", { id: p.id });
+            showVpnFeedback(t("vpn.switched"));
+          } catch (e) {
+            vpnLocalError = tError(e);
+            vpn.error.textContent = vpnLocalError;
+          } finally {
+            setVpnBusy(false);
+          }
+        });
+
+        const actions = document.createElement("div");
+        actions.className = "vpn-profile-actions";
+
+        const ping = vpnPings.get(p.id);
+        if (ping) {
+          const pingBadge = document.createElement("span");
+          pingBadge.className = "vpn-profile-ping";
+          pingBadge.dataset.state = ping.state;
+          if (ping.state === "testing") {
+            pingBadge.textContent = "…";
+          } else if (ping.state === "ok" && ping.ms !== undefined) {
+            pingBadge.textContent = t("vpn.pingOk", { ms: ping.ms });
+          } else {
+            pingBadge.textContent = t("vpn.pingFail");
+          }
+          actions.append(pingBadge);
+        }
+
+        const testBtn = document.createElement("button");
+        testBtn.type = "button";
+        testBtn.className = "ghost-btn vpn-profile-test";
+        testBtn.textContent = t("vpn.testShort");
+        testBtn.disabled = vpnBusy;
+        testBtn.addEventListener("click", async () => {
+          if (vpnBusy) return;
+          vpnLocalError = "";
+          vpnPings.set(p.id, { state: "testing" });
+          setVpnBusy(true);
+          renderVpn();
+          showVpnFeedback(t("vpn.testing"));
+          try {
+            const res = await invoke<{ latency_ms: number }>("vpn_test", { profileId: p.id });
+            vpnPings.set(p.id, { state: "ok", ms: res.latency_ms });
+            showVpnFeedback(t("vpn.testOk", { ms: res.latency_ms }));
+          } catch (e) {
+            vpnPings.set(p.id, { state: "error" });
+            const switchedAway =
+              vpnStatus.notice?.kind === "switched" && vpnStatus.active_profile_id !== p.id;
+            if (!switchedAway) {
+              showVpnFeedback("");
+              vpnLocalError = tError(e);
+            }
+          } finally {
+            setVpnBusy(false);
+            renderVpn();
+          }
+        });
+
+        const removeBtn = document.createElement("button");
+        removeBtn.type = "button";
+        removeBtn.className = "ghost-btn vpn-profile-remove";
+        removeBtn.textContent = t("vpn.removeShort");
+        removeBtn.disabled = vpnBusy;
+        removeBtn.addEventListener("click", async () => {
+          if (vpnBusy) return;
+          vpnLocalError = "";
+          setVpnBusy(true);
+          showVpnFeedback("");
+          vpn.error.textContent = "";
+          try {
+            await invoke("vpn_remove_profile", { id: p.id });
+            vpnPings.delete(p.id);
+            showVpnFeedback(t("vpn.removed"));
+          } catch (e) {
+            vpnLocalError = tError(e);
+            vpn.error.textContent = vpnLocalError;
+          } finally {
+            setVpnBusy(false);
+          }
+        });
+
+        actions.append(testBtn, removeBtn);
+        row.append(selectBtn, actions);
+        return row;
+      }),
+    );
+  }
+
+  const selected = new Set(vpnStatus.services);
+  if (!services.length) {
+    const empty = document.createElement("small");
+    empty.className = "hint";
+    empty.textContent = t("vpn.servicesEmpty");
+    vpn.services.replaceChildren(empty);
+  } else {
+    vpn.services.replaceChildren(
+      ...services.map((s) => {
+        const label = document.createElement("label");
+        label.className = "check";
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.checked = selected.has(s.id);
+        box.disabled = vpnBusy;
+        box.addEventListener("change", () => {
+          const next = new Set(vpnStatus.services);
+          if (box.checked) next.add(s.id);
+          else next.delete(s.id);
+          setVpnBusy(true);
+          vpn.error.textContent = "";
+          invoke("vpn_set_services", { services: [...next] })
+            .catch((e) => {
+              box.checked = !box.checked;
+              vpn.error.textContent = tError(e);
+            })
+            .finally(() => setVpnBusy(false));
+        });
+        const name = document.createElement("span");
+        name.textContent = s.name;
+        label.append(box, name);
+        return label;
+      }),
+    );
+  }
+}
+
+function showVpnFeedback(text: string) {
+  vpn.feedback.textContent = text;
+  vpn.feedback.hidden = !text;
+}
+
+vpn.enabledBox.addEventListener("change", () => {
+  if (vpnBusy) {
+    vpn.enabledBox.checked = vpnStatus.state !== "disabled";
+    return;
+  }
+  setVpnBusy(true);
+  invoke("vpn_set_enabled", { enabled: vpn.enabledBox.checked })
+    .catch((e) => {
+      vpn.enabledBox.checked = !vpn.enabledBox.checked;
+      vpn.error.textContent = tError(e);
+    })
+    .finally(() => setVpnBusy(false));
+});
+
+vpn.failoverBox.addEventListener("change", () => {
+  if (vpnBusy) {
+    vpn.failoverBox.checked = vpnStatus.auto_failover;
+    return;
+  }
+  setVpnBusy(true);
+  vpn.error.textContent = "";
+  invoke("vpn_set_auto_failover", { enabled: vpn.failoverBox.checked })
+    .catch((e) => {
+      vpn.failoverBox.checked = !vpn.failoverBox.checked;
+      vpn.error.textContent = tError(e);
+    })
+    .finally(() => setVpnBusy(false));
+});
+
+vpn.button.addEventListener("click", () => {
+  vpnLocalError = "";
+  showVpnFeedback("");
+  vpn.error.textContent = "";
+  invoke<VpnStatus>("vpn_status")
+    .then((status) => {
+      vpnStatus = status;
+      renderVpn();
+      returnTo = null;
+      openOverlay("vpn");
+    })
+    .catch(console.error);
+});
+
+vpn.importBtn.addEventListener("click", () => {
+  if (!vpnBusy && vpnStatus.profiles.length < MAX_VPN_PROFILES) vpn.file.click();
+});
+
+vpn.file.addEventListener("change", async () => {
+  const file = vpn.file.files?.[0];
+  vpn.file.value = "";
+  if (!file || vpnBusy) return;
+  if (file.size > 16 * 1024) {
+    showVpnFeedback("");
+    vpn.error.textContent = t("vpn.error.confTooLarge");
+    return;
+  }
+  setVpnBusy(true);
+  showVpnFeedback("");
+  vpn.error.textContent = "";
+  try {
+    const raw = await file.text();
+    await invoke("vpn_import_conf", { raw, label: file.name });
+    showVpnFeedback(t("vpn.imported"));
+  } catch (e) {
+    vpn.error.textContent = tError(e);
+  } finally {
+    setVpnBusy(false);
+  }
+});
+
+vpnStatus = await invoke<VpnStatus>("vpn_status");
+renderVpn();
+await listen<VpnStatus>("vpn-changed", ({ payload }) => {
+  vpnStatus = payload;
+  renderVpn();
+});
 
 await setupMusic(select);
 

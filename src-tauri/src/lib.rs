@@ -20,6 +20,7 @@ mod spellcheck;
 mod tray;
 mod update;
 mod volume;
+mod vpn;
 mod wallpaper;
 mod whats_new;
 
@@ -481,18 +482,29 @@ fn remove_service(app: AppHandle, id: String) -> Result<(), String> {
     }
     services_changed(&app);
     let app = app.clone();
-    {
+    let (vpn_changed, vpn_empty) = {
         let mut settings = state.settings.lock().unwrap();
         let links = settings.links.len();
+        let vpn_services = settings.vpn.services.len();
         settings
             .links
             .retain(|r| r.app.as_deref() != Some(id.as_str()));
-        if settings.home_app.as_deref() == Some(id.as_str()) || settings.links.len() != links {
+        settings.vpn.services.retain(|s| s != &id);
+        let changed_vpn = settings.vpn.services.len() != vpn_services;
+        let empty_vpn = settings.vpn.services.is_empty();
+        if settings.home_app.as_deref() == Some(id.as_str())
+            || settings.links.len() != links
+            || changed_vpn
+        {
             if settings.home_app.as_deref() == Some(id.as_str()) {
                 settings.home_app = None;
             }
             let _ = display::save(&state.settings_path, &settings);
         }
+        (changed_vpn, empty_vpn)
+    };
+    if vpn_changed {
+        vpn::on_service_removed(&app, vpn_empty);
     }
     std::thread::spawn(move || {
         close_webview(&app, &id);
@@ -826,6 +838,7 @@ pub fn run() {
             app.manage(downloads::Downloads::load(&data_dir));
             app.manage(bitwarden::Vault::default());
             app.manage(ci::Ci::default());
+            app.manage(vpn::Vpn::default());
             ci::watch(app.handle());
 
             let window = WindowBuilder::new(app, "main")
@@ -912,6 +925,8 @@ pub fn run() {
                     }
                 }
                 update_zoom(&handle, true);
+                vpn::init_settings(&handle);
+                vpn::start_if_needed(&handle);
                 // Los servicios sin bloqueo no esperan a las listas.
                 open_missing(&handle);
                 prepare_blocker(&handle);
@@ -997,11 +1012,23 @@ pub fn run() {
             wallpaper::wallpaper_import,
             wallpaper::wallpaper_search,
             wallpaper::wallpaper_download,
+            vpn::vpn_get_settings,
+            vpn::vpn_status,
+            vpn::vpn_import_conf,
+            vpn::vpn_select_profile,
+            vpn::vpn_remove_profile,
+            vpn::vpn_set_auto_failover,
+            vpn::vpn_set_enabled,
+            vpn::vpn_set_services,
+            vpn::vpn_test,
+            vpn::vpn_open_proton,
+            vpn::vpn_notify,
         ])
         .build(tauri::generate_context!())
         .expect("error while running tauri application")
         .run(|app, event| {
             if let tauri::RunEvent::Exit = event {
+                vpn::stop(app);
                 quit::on_exit(app);
             }
         });
@@ -1191,18 +1218,25 @@ fn fetch_icon(app: &AppHandle, id: String, url: String) {
 /// Cierra el webview de un servicio y espera a que desaparezca, para poder
 /// volver a crearlo con la misma etiqueta.
 fn close_webview(app: &AppHandle, id: &str) {
+    close_webview_with_wait(app, id, false);
+}
+
+fn close_webview_with_wait(app: &AppHandle, id: &str, force_wait: bool) {
     let Some(webview) = app.get_webview(id) else {
         return;
     };
 
     #[cfg(windows)]
-    let standby_active = app
-        .state::<AppState>()
-        .standby_master
-        .load(Ordering::SeqCst);
+    let wait_process = force_wait
+        || app
+            .state::<AppState>()
+            .standby_master
+            .load(Ordering::SeqCst);
+    #[cfg(not(windows))]
+    let _ = force_wait;
 
     #[cfg(windows)]
-    let browser_pid = if standby_active {
+    let browser_pid = if wait_process {
         let _ = webview.eval(
             r#"(() => {
             try {
@@ -1225,9 +1259,25 @@ fn close_webview(app: &AppHandle, id: &str) {
     }
 
     #[cfg(windows)]
-    if standby_active && browser_pid > 0 {
+    if wait_process && browser_pid > 0 {
         terminate_app_processes(browser_pid);
     }
+}
+
+/// Reabre apenas os webviews cujas configurações de VPN mudaram, garantindo que
+/// o processo anterior encerre antes de aplicar novos argumentos do navegador.
+pub(crate) fn reopen_services_for_vpn(app: &AppHandle, ids: Vec<String>) {
+    let app = app.clone();
+    std::thread::spawn(move || {
+        {
+            let state = app.state::<AppState>();
+            let _one_at_a_time = state.opening.lock().unwrap();
+            for id in &ids {
+                close_webview_with_wait(&app, id, true);
+            }
+        }
+        open_missing(&app);
+    });
 }
 
 /// PID del navegador de WebView2 de este webview (0 si no se pudo leer).
@@ -1529,9 +1579,20 @@ fn open_service(
                     }
                 }
             });
+    let vpn_proxy = vpn::proxy_for_service(app, &service.id);
+    if let Some(webrtc_script) = vpn::webrtc_script_for_service(app, &service.id) {
+        builder = builder.initialization_script(webrtc_script);
+    }
     #[cfg(windows)]
     {
-        builder = builder.additional_browser_args(&spellcheck::webview2_args());
+        let mut args = spellcheck::webview2_args();
+        if let Some(proxy) = &vpn_proxy {
+            args.push_str(" --proxy-server=");
+            args.push_str(proxy);
+            args.push_str(" --force-webrtc-ip-handling-policy=disable_non_proxied_udp");
+            args.push_str(" --webrtc-ip-handling-policy=disable_non_proxied_udp");
+        }
+        builder = builder.additional_browser_args(&args);
     }
     #[cfg(target_os = "linux")]
     if let Some(script) = platform::compose_script() {
@@ -1581,12 +1642,32 @@ fn open_service(
     }
 
     #[cfg(any(target_os = "linux", target_os = "macos"))]
-    platform::attach(&webview, initial_load, blocker, &service.url, service.theme)?;
+    platform::attach(
+        &webview,
+        initial_load,
+        blocker,
+        &service.url,
+        service.theme,
+        vpn_proxy.as_deref(),
+    )?;
     #[cfg(windows)]
     {
         let url = service.url.clone();
         let theme = service.theme;
-        webview.with_webview(move |platform| platform::attach(platform, blocker, &url, theme))?;
+        let has_vpn = vpn_proxy.is_some();
+        webview.with_webview(move |platform| {
+            if has_vpn {
+                if let Some(wry_webview) = platform.downcast_ref::<tauri_runtime_wry::Webview>() {
+                    if let Ok(core) = unsafe { wry_webview.controller().CoreWebView2() } {
+                        let mut pid = 0u32;
+                        if unsafe { core.BrowserProcessId(&mut pid) }.is_ok() && pid != 0 {
+                            vpn::peer_auth::register_allowed_root_pid(pid);
+                        }
+                    }
+                }
+            }
+            platform::attach(platform, blocker, &url, theme);
+        })?;
     }
     Ok(())
 }

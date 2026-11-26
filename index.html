@@ -37,6 +37,12 @@
           <path d="M11 12l9-9M17 6l3 3M14.5 8.5l2 2" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" />
         </svg>
       </button>
+      <button id="vpn" type="button" hidden data-i18n-title="sidebar.vpn" data-i18n-label="sidebar.vpn">
+        <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
+          <path d="M12 3l7 3v6c0 4.5-3 7.8-7 9-4-1.2-7-4.5-7-9V6l7-3z" fill="none" stroke="currentColor" stroke-width="2" stroke-linejoin="round" />
+        </svg>
+        <span class="vpn-dot" aria-hidden="true"></span>
+      </button>
       <button id="manage" type="button" data-i18n-title="sidebar.manage" data-i18n-label="sidebar.manage">
         <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true">
           <path fill="currentColor" d="M19.4 13a7.6 7.6 0 0 0 0-2l2.1-1.6-2-3.5-2.5 1a7.4 7.4 0 0 0-1.7-1L15 3h-4l-.3 2.9a7.4 7.4 0 0 0-1.7 1l-2.5-1-2 3.5L6.6 11a7.6 7.6 0 0 0 0 2l-2.1 1.6 2 3.5 2.5-1a7.4 7.4 0 0 0 1.7 1L11 21h4l.3-2.9a7.4 7.4 0 0 0 1.7-1l2.5 1 2-3.5zM13 15.5a3.5 3.5 0 1 1 0-7 3.5 3.5 0 0 1 0 7z" transform="translate(-1 0)"/>
@@ -162,6 +168,13 @@
           <span>
             <span data-i18n="manage.vault"></span>
             <small data-i18n="manage.vaultHint"></small>
+          </span>
+        </label>
+        <label class="check">
+          <input id="vpn-enabled" type="checkbox" />
+          <span>
+            <span data-i18n="manage.vpn"></span>
+            <small data-i18n="manage.vpnHint"></small>
           </span>
         </label>
         <label class="check">
@@ -301,6 +314,40 @@
           <button type="submit" id="vault-unlock" data-i18n="vault.unlock" hidden></button>
         </footer>
       </form>
+
+      <section class="card" id="vpn-view" hidden>
+        <header>
+          <h2 data-i18n="vpn.title"></h2>
+          <span id="vpn-badge" class="vpn-badge"></span>
+          <button type="button" class="ghost-btn" data-close data-i18n="manage.close"></button>
+        </header>
+        <div class="vpn-box">
+          <div class="vpn-box-head">
+            <span class="field-label" data-i18n="vpn.profilesTitle"></span>
+            <small id="vpn-count" class="hint"></small>
+          </div>
+          <div id="vpn-profiles"></div>
+          <div class="vpn-actions">
+            <button type="button" class="ghost-btn" id="vpn-import" data-i18n="vpn.import"></button>
+            <input id="vpn-file" type="file" accept=".conf,.txt" hidden />
+          </div>
+          <label class="check" id="vpn-failover-row">
+            <input id="vpn-failover" type="checkbox" />
+            <span>
+              <span data-i18n="vpn.failover"></span>
+              <small data-i18n="vpn.failoverHint"></small>
+            </span>
+          </label>
+          <small class="hint" data-i18n-html="vpn.confHint"></small>
+        </div>
+        <div class="vpn-services-box">
+          <span class="field-label" data-i18n="vpn.servicesTitle"></span>
+          <div id="vpn-services"></div>
+          <small class="hint" data-i18n="vpn.servicesHint"></small>
+        </div>
+        <p id="vpn-feedback" class="hint" role="status" aria-live="polite" hidden></p>
+        <p id="vpn-error" class="error" role="alert"></p>
+      </section>
 
       <form class="card" id="form-view" hidden autocomplete="off">
         <h2 id="form-title"></h2>

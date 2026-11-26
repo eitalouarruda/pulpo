@@ -36,6 +36,12 @@ chrono = { version = "0.4", default-features = false, features = ["clock"] }
 keyring = "4"
 # Aviso al terminar un run de CI.
 notify-rust = "4"
+# Túnel WireGuard em espaço de usuário por app (ver `vpn`).
+boringtun = "0.7"
+getrandom = "0.2"
+smoltcp = { version = "0.12", default-features = false, features = ["std", "medium-ip", "proto-ipv4", "proto-ipv4-fragmentation", "socket-tcp", "socket-tcp-cubic", "assembler-max-segment-count-32", "socket-dns", "socket-udp"] }
+tokio = { version = "1", features = ["net", "io-util", "time", "sync", "macros"] }
+zeroize = "1"
 
 # Linux y macOS: Chromium (CEF), con el mismo bloqueo y perfiles.
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
@@ -59,6 +65,7 @@ webview2-com = "0.39"
 windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_Globalization",
+    "Win32_NetworkManagement_IpHelper",
     "Win32_System_Com",
     # Terminar los navegadores de WebView2 que sigan vivos al salir (ver `quit`).
     "Win32_System_Diagnostics_ToolHelp",
@@ -70,3 +77,12 @@ windows-core = "0.62"
 lto = true
 codegen-units = 1
 strip = true
+
+[profile.dev.package.boringtun]
+opt-level = 3
+
+[profile.dev.package.smoltcp]
+opt-level = 3
+
+[profile.dev.package.ring]
+opt-level = 3

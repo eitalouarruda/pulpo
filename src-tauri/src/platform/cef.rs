@@ -75,9 +75,13 @@ pub fn attach(
     blocker: Option<Arc<Blocker>>,
     url: &str,
     theme: Theme,
+    vpn_proxy: Option<&str>,
 ) -> tauri::Result<()> {
     if initial_load.recv_timeout(Duration::from_secs(10)).is_err() {
         eprintln!("[pulpo] {url}: la carga inicial no terminó; se navega igual");
+    }
+    if let Err(e) = set_proxy(webview, vpn_proxy) {
+        eprintln!("[pulpo] {url}: no se pudo configurar el proxy: {e}");
     }
     if let Err(e) = set_theme(webview, theme) {
         eprintln!("[pulpo] {url}: no se pudo fijar el tema: {e}");
@@ -95,6 +99,75 @@ pub fn attach(
         }
     }
     webview.navigate(url.parse().expect("url del servicio"))
+}
+
+fn set_proxy(webview: &Webview, vpn_proxy: Option<&str>) -> Result<(), String> {
+    let proxy = vpn_proxy.map(str::to_string);
+    let (tx, rx) = mpsc::channel();
+    webview
+        .with_cef_webview(move |handle| {
+            struct Done(mpsc::Sender<()>);
+            impl Drop for Done {
+                fn drop(&mut self) {
+                    let _ = self.0.send(());
+                }
+            }
+            let _done = Done(tx);
+            use tauri_runtime_cef::cef::{
+                self, CefString, ImplBrowser, ImplBrowserHost, ImplDictionaryValue,
+                ImplPreferenceManager, ImplValue,
+            };
+            let Some(host) = handle.browser().host() else {
+                return;
+            };
+            let Some(rc) = host.request_context() else {
+                return;
+            };
+            let name = CefString::from("proxy");
+            if rc.can_set_preference(Some(&name)) != 1 {
+                return;
+            }
+            let Some(dict) = cef::dictionary_value_create() else {
+                return;
+            };
+            let set_str = |key: &str, val: &str| {
+                if let Some(mut v) = cef::value_create() {
+                    v.set_string(Some(&CefString::from(val)));
+                    dict.set_value(Some(&CefString::from(key)), Some(&mut v));
+                }
+            };
+            match proxy.as_deref() {
+                Some(server) => {
+                    set_str("mode", "fixed_servers");
+                    set_str("server", server);
+                }
+                None => {
+                    set_str("mode", "system");
+                }
+            }
+            if let Some(mut val) = cef::value_create() {
+                let mut dict = dict;
+                val.set_dictionary(Some(&mut dict));
+                let mut err = CefString::from("");
+                let _ = rc.set_preference(Some(&name), Some(&mut val), Some(&mut err));
+            }
+            let rtc_name = CefString::from("webrtc.ip_handling_policy");
+            if rc.can_set_preference(Some(&rtc_name)) == 1 {
+                if let Some(mut v) = cef::value_create() {
+                    let policy = if proxy.is_some() {
+                        "disable_non_proxied_udp"
+                    } else {
+                        "default"
+                    };
+                    v.set_string(Some(&CefString::from(policy)));
+                    let mut err = CefString::from("");
+                    let _ = rc.set_preference(Some(&rtc_name), Some(&mut v), Some(&mut err));
+                }
+            }
+        })
+        .map_err(|e| e.to_string())?;
+    let _ = rx.recv_timeout(Duration::from_secs(3));
+    Ok(())
 }
 
 /// El tema que la página ve en `prefers-color-scheme`. Con `Dark` también el
